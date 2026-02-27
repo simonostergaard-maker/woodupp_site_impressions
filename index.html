@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WoodUpp GSC Analytics Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0f1117;
+  --card: #1a1d27;
+  --border: #2a2d3a;
+  --text: #e4e6ed;
+  --muted: #8b8fa3;
+  --accent: #6366f1;
+  --accent2: #818cf8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --blue: #3b82f6;
+  --cyan: #06b6d4;
+  --pink: #ec4899;
+  --purple: #a855f7;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* Header */
+.header { background: var(--card); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+.header h1 { font-size: 18px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.header .subtitle { color: var(--muted); font-size: 12px; }
+
+/* Tabs */
+.tabs { display: flex; gap: 2px; background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; overflow-x: auto; }
+.tab { padding: 10px 16px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; user-select: none; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+/* Layout */
+.content { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Cards */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+.card h3 { font-size: 14px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* KPI row */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.kpi { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.kpi .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.kpi .value { font-size: 26px; font-weight: 700; }
+.kpi .value.green { color: var(--green); }
+.kpi .value.blue { color: var(--blue); }
+.kpi .value.orange { color: var(--orange); }
+.kpi .value.purple { color: var(--purple); }
+.kpi .value.cyan { color: var(--cyan); }
+.kpi .value.pink { color: var(--pink); }
+
+/* Grid layouts */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+@media (max-width: 1200px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 800px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+/* Table */
+.table-wrap { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { position: sticky; top: 0; background: var(--card); padding: 8px 10px; text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
+th:hover { color: var(--text); }
+th.sort-asc::after { content: ' \u25B2'; }
+th.sort-desc::after { content: ' \u25BC'; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:hover td { background: rgba(99, 102, 241, 0.05); }
+.url-cell { max-width: 350px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Filters */
+.filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: center; }
+.filter-group { display: flex; flex-direction: column; gap: 3px; }
+.filter-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+select, input[type="text"], input[type="search"] {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 7px 10px;
+  border-radius: 6px; font-size: 13px; min-width: 140px; outline: none;
+}
+select:focus, input:focus { border-color: var(--accent); }
+
+/* Chart containers */
+.chart-container { position: relative; height: 300px; }
+.chart-container.tall { height: 400px; }
+
+/* Market pills */
+.market-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.pill { padding: 5px 12px; font-size: 12px; border: 1px solid var(--border); border-radius: 20px; cursor: pointer; user-select: none; transition: all 0.2s; }
+.pill:hover { border-color: var(--accent); }
+.pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Badge */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-green { background: rgba(34,197,94,0.15); color: var(--green); }
+.badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge-blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+.badge-orange { background: rgba(245,158,11,0.15); color: var(--orange); }
+
+/* Comparison section */
+.comparison-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: start; }
+.vs-badge { padding: 16px 12px; color: var(--muted); font-weight: 700; font-size: 18px; align-self: center; }
+.comp-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.comp-card h4 { color: var(--accent2); margin-bottom: 10px; font-size: 14px; }
+.comp-metric { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.comp-metric:last-child { border: none; }
+.comp-label { color: var(--muted); font-size: 13px; }
+.comp-value { font-weight: 600; font-size: 14px; }
+.delta { font-size: 12px; margin-left: 6px; }
+.delta.up { color: var(--green); }
+.delta.down { color: var(--red); }
+
+/* Search input */
+.search-input { position: relative; }
+.search-input input { width: 100%; padding-left: 32px; }
+.search-input::before { content: '\uD83D\uDD0D'; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; }
+
+/* Loading */
+.loading { text-align: center; padding: 40px; color: var(--muted); }
+.loading::after { content: ''; display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-left: 8px; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+.pct-bar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; }
+.pct-bar .anon { background: var(--orange); }
+.pct-bar .known { background: var(--accent); }
+
+.mini-table { font-size: 12px; }
+.mini-table td, .mini-table th { padding: 4px 8px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>WoodUpp GSC Analytics</h1>
+    <div class="subtitle">Google Search Console Multi-Market Dashboard</div>
+  </div>
+</div>
+
+<div class="tabs" id="tabsBar">
+  <div class="tab active" data-tab="overview">Dashboard</div>
+  <div class="tab" data-tab="anonymized">Anonymized Queries</div>
+  <div class="tab" data-tab="urls">URL Performance</div>
+  <div class="tab" data-tab="keywords">Keyword Performance</div>
+  <div class="tab" data-tab="countries">Country Overview</div>
+  <div class="tab" data-tab="domains">Domain Comparison</div>
+  <div class="tab" data-tab="devices">Device & Search Type</div>
+  <div class="tab" data-tab="comparison">Date Comparison</div>
+  <div class="tab" data-tab="serp">SERP Features</div>
+</div>
+
+<div class="content">
+  <!-- DASHBOARD OVERVIEW -->
+  <div class="tab-content active" id="tab-overview">
+    <div id="overview-kpis"></div>
+    <div class="grid-2">
+      <div class="card"><h3>Daily Impressions by Market</h3><div class="chart-container" id="chart-daily-impressions"></div></div>
+      <div class="card"><h3>Daily Clicks by Market</h3><div class="chart-container" id="chart-daily-clicks"></div></div>
+    </div>
+    <div class="card"><h3>Market Performance Summary</h3><div class="table-wrap" id="market-summary-table"></div></div>
+    <div class="grid-2">
+      <div class="card"><h3>Impressions Distribution by Market</h3><div class="chart-container" id="chart-market-pie"></div></div>
+      <div class="card"><h3>CTR by Market</h3><div class="chart-container" id="chart-market-ctr"></div></div>
+    </div>
+  </div>
+
+  <!-- ANONYMIZED QUERIES -->
+  <div class="tab-content" id="tab-anonymized">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="anon-market-filter"><option value="all">All Markets</option></select></div>
+    </div>
+    <div id="anon-kpis"></div>
+    <div class="grid-2">
+      <div class="card"><h3>Anonymized vs Known Queries Over Time</h3><div class="chart-container" id="chart-anon-timeline"></div></div>
+      <div class="card"><h3>Anonymized Query % by Market</h3><div class="chart-container" id="chart-anon-by-market"></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Anonymized Ratio by Device</h3><div class="chart-container" id="chart-anon-device"></div></div>
+      <div class="card"><h3>Anonymized Ratio by Search Type</h3><div class="chart-container" id="chart-anon-search-type"></div></div>
+    </div>
+    <div class="card"><h3>Anonymized Query Distribution by Visitor Country (Top 30)</h3><div class="chart-container tall" id="chart-anon-country"></div></div>
+  </div>
+
+  <!-- URL PERFORMANCE -->
+  <div class="tab-content" id="tab-urls">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="url-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Search</label><input type="search" id="url-search" placeholder="Filter URLs..."></div>
+      <div class="filter-group"><label>Sort by</label>
+        <select id="url-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
+      </div>
+    </div>
+    <div class="card"><h3>Top URLs</h3><div class="table-wrap" id="url-table"></div></div>
+    <div class="card"><h3>Daily Trend for Selected URL</h3>
+      <select id="url-trend-select" style="margin-bottom: 10px"><option value="">Select a URL to see its trend...</option></select>
+      <div class="chart-container" id="chart-url-trend"></div>
+    </div>
+  </div>
+
+  <!-- KEYWORD PERFORMANCE -->
+  <div class="tab-content" id="tab-keywords">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="kw-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Search</label><input type="search" id="kw-search" placeholder="Filter keywords..."></div>
+      <div class="filter-group"><label>Sort by</label>
+        <select id="kw-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
+      </div>
+    </div>
+    <div class="card"><h3>Top Keywords</h3><div class="table-wrap" id="kw-table"></div></div>
+    <div class="card"><h3>Daily Trend for Selected Keyword</h3>
+      <select id="kw-trend-select" style="margin-bottom: 10px"><option value="">Select a keyword to see its trend...</option></select>
+      <div class="chart-container" id="chart-kw-trend"></div>
+    </div>
+  </div>
+
+  <!-- COUNTRY OVERVIEW -->
+  <div class="tab-content" id="tab-countries">
+    <div class="filters">
+      <div class="filter-group"><label>Sort by</label>
+        <select id="country-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="anon_pct">Anon %</option></select>
+      </div>
+    </div>
+    <div class="card"><h3>Visitor Countries - Impressions (Top 30)</h3><div class="chart-container tall" id="chart-country-bar"></div></div>
+    <div class="card"><h3>All Visitor Countries</h3><div class="table-wrap" id="country-table"></div></div>
+    <div class="card"><h3>Daily Impressions by Top Visitor Countries</h3>
+      <div class="market-pills" id="country-pills"></div>
+      <div class="chart-container tall" id="chart-country-daily"></div>
+    </div>
+  </div>
+
+  <!-- DOMAIN COMPARISON -->
+  <div class="tab-content" id="tab-domains">
+    <div class="filters">
+      <div class="filter-group"><label>Market A</label><select id="domain-a"></select></div>
+      <div class="filter-group"><label>Market B</label><select id="domain-b"></select></div>
+    </div>
+    <div class="comparison-row" id="domain-comparison"></div>
+    <div class="grid-2" style="margin-top:16px">
+      <div class="card"><h3>Daily Impressions Comparison</h3><div class="chart-container" id="chart-domain-comp-imp"></div></div>
+      <div class="card"><h3>Daily Clicks Comparison</h3><div class="chart-container" id="chart-domain-comp-clicks"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>All Markets Ranked</h3><div class="chart-container tall" id="chart-all-markets-rank"></div></div>
+  </div>
+
+  <!-- DEVICE & SEARCH TYPE -->
+  <div class="tab-content" id="tab-devices">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="dev-market-filter"><option value="all">All Markets</option></select></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Device Split - Impressions</h3><div class="chart-container" id="chart-device-pie"></div></div>
+      <div class="card"><h3>Search Type Split - Impressions</h3><div class="chart-container" id="chart-search-pie"></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Daily Impressions by Device</h3><div class="chart-container" id="chart-device-daily"></div></div>
+      <div class="card"><h3>Daily Impressions by Search Type</h3><div class="chart-container" id="chart-search-daily"></div></div>
+    </div>
+    <div class="card"><h3>Device Performance by Market</h3><div class="table-wrap" id="device-market-table"></div></div>
+  </div>
+
+  <!-- DATE COMPARISON -->
+  <div class="tab-content" id="tab-comparison">
+    <div class="filters">
+      <div class="filter-group"><label>Preset</label>
+        <select id="comp-preset">
+          <option value="last7vs7">Last 7 days vs Previous 7 days</option>
+          <option value="last3vs3">Last 3 days vs Previous 3 days</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="filter-group" id="comp-custom-a" style="display:none"><label>Period A (from)</label><input type="text" id="comp-a-from" placeholder="YYYY-MM-DD"></div>
+      <div class="filter-group" id="comp-custom-a2" style="display:none"><label>Period A (to)</label><input type="text" id="comp-a-to" placeholder="YYYY-MM-DD"></div>
+      <div class="filter-group" id="comp-custom-b" style="display:none"><label>Period B (from)</label><input type="text" id="comp-b-from" placeholder="YYYY-MM-DD"></div>
+      <div class="filter-group" id="comp-custom-b2" style="display:none"><label>Period B (to)</label><input type="text" id="comp-b-to" placeholder="YYYY-MM-DD"></div>
+      <div class="filter-group"><label>&nbsp;</label><button onclick="runComparison()" style="padding:7px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Compare</button></div>
+    </div>
+    <div id="comp-results"></div>
+  </div>
+
+  <!-- SERP FEATURES -->
+  <div class="tab-content" id="tab-serp">
+    <div class="card"><h3>SERP Feature Presence (All Markets)</h3><div class="chart-container tall" id="chart-serp-bar"></div></div>
+    <div class="card"><h3>SERP Features Detail</h3><div class="table-wrap" id="serp-table"></div></div>
+    <div class="card"><h3>SERP Features by Market</h3>
+      <div class="filters"><div class="filter-group"><label>Market</label><select id="serp-market-filter"></select></div></div>
+      <div class="table-wrap" id="serp-market-table"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Data Storage ───
+let DATA = {};
+const COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#3b82f6','#ec4899','#06b6d4','#a855f7','#f97316','#14b8a6','#e11d48','#8b5cf6','#84cc16','#0ea5e9','#d946ef','#64748b','#fb923c','#2dd4bf','#f43f5e','#7c3aed'];
+const charts = {};
+
+// ─── Utils ───
+function fmt(n) { return n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(1)+'K' : n.toString(); }
+function fmtN(n) { return n.toLocaleString(); }
+function pct(a,b) { return b > 0 ? (a/b*100).toFixed(1) : '0.0'; }
+function delta(a,b) { if(b===0) return {val:0,cls:''}; const d=((a-b)/b*100).toFixed(1); return {val:d, cls: d>0?'up':'down', sign: d>0?'+':''}; }
+
+function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function makeChart(containerId, config) {
+  destroyChart(containerId);
+  const container = document.getElementById(containerId);
+  container.innerHTML = '<canvas></canvas>';
+  const ctx = container.querySelector('canvas').getContext('2d');
+  charts[containerId] = new Chart(ctx, config);
+  return charts[containerId];
+}
+
+// ─── Data Loading ───
+async function loadAll() {
+  const files = ['overview','daily_metrics','anonymized','url_performance','keyword_performance','country_data','device_search','serp_features','url_daily','keyword_daily'];
+  const promises = files.map(f => fetch('data/'+f+'.json').then(r => r.json()));
+  const results = await Promise.all(promises);
+  files.forEach((f,i) => DATA[f] = results[i]);
+  initApp();
+}
+
+// ─── Tab Navigation ───
+document.getElementById('tabsBar').addEventListener('click', e => {
+  if (!e.target.classList.contains('tab')) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('tab-'+e.target.dataset.tab).classList.add('active');
+});
+
+// ─── Init ───
+function initApp() {
+  populateFilters();
+  renderOverview();
+  renderAnonymized();
+  renderUrls();
+  renderKeywords();
+  renderCountries();
+  renderDomains();
+  renderDevices();
+  renderSerpFeatures();
+  setupComparison();
+}
+
+function populateFilters() {
+  const markets = DATA.overview.markets;
+  const selectors = ['anon-market-filter','dev-market-filter'];
+  selectors.forEach(id => {
+    const el = document.getElementById(id);
+    markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; el.appendChild(o); });
+  });
+  ['url-market-filter','kw-market-filter'].forEach(id => {
+    const el = document.getElementById(id);
+    markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; el.appendChild(o); });
+  });
+  ['domain-a','domain-b'].forEach((id,i) => {
+    const el = document.getElementById(id);
+    markets.forEach((m,j) => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; if(j===(i===0?0:1)) o.selected=true; el.appendChild(o); });
+  });
+  const serpSel = document.getElementById('serp-market-filter');
+  markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; serpSel.appendChild(o); });
+}
+
+// ═══════════════════════════════════════════
+// TAB 1: DASHBOARD OVERVIEW
+// ═══════════════════════════════════════════
+function renderOverview() {
+  const t = DATA.overview.totals;
+  document.getElementById('overview-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Total Impressions</div><div class="value blue">${fmtN(t.impressions)}</div></div>
+      <div class="kpi"><div class="label">Total Clicks</div><div class="value green">${fmtN(t.clicks)}</div></div>
+      <div class="kpi"><div class="label">Avg CTR</div><div class="value orange">${t.avg_ctr}%</div></div>
+      <div class="kpi"><div class="label">Avg Position</div><div class="value purple">${t.avg_position}</div></div>
+      <div class="kpi"><div class="label">Unique Keywords</div><div class="value cyan">${fmtN(t.unique_keywords)}</div></div>
+      <div class="kpi"><div class="label">Unique URLs</div><div class="value pink">${fmtN(t.unique_urls)}</div></div>
+      <div class="kpi"><div class="label">Anonymized Queries</div><div class="value orange">${pct(t.anonymized_queries, t.queries+t.anonymized_queries)}%</div></div>
+      <div class="kpi"><div class="label">Markets</div><div class="value">${DATA.overview.markets.length}</div></div>
+    </div>`;
+
+  // Daily impressions/clicks charts
+  const dates = DATA.overview.dates;
+  const dm = DATA.daily_metrics;
+  const markets = Object.keys(DATA.overview.per_market).sort((a,b) => DATA.overview.per_market[b].impressions - DATA.overview.per_market[a].impressions).slice(0,8);
+
+  const impDatasets = markets.map((m,i) => ({
+    label: m, data: dates.map(d => dm[d]?.[m]?.impressions || 0),
+    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
+  }));
+  makeChart('chart-daily-impressions', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:impDatasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  const clickDatasets = markets.map((m,i) => ({
+    label: m, data: dates.map(d => dm[d]?.[m]?.clicks || 0),
+    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
+  }));
+  makeChart('chart-daily-clicks', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:clickDatasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Market summary table
+  const pm = DATA.overview.per_market;
+  const sorted = Object.entries(pm).sort((a,b)=>b[1].impressions-a[1].impressions);
+  let html = '<table><thead><tr><th>Market</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th><th>URLs</th></tr></thead><tbody>';
+  sorted.forEach(([m,d]) => {
+    html += `<tr><td>${m}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td><td>${d.avg_ctr}%</td><td>${d.avg_position}</td><td>${fmtN(d.unique_keywords)}</td><td>${fmtN(d.unique_urls)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('market-summary-table').innerHTML = html;
+
+  // Market pie
+  const pieLabels = sorted.map(s=>s[0]);
+  const pieData = sorted.map(s=>s[1].impressions);
+  makeChart('chart-market-pie', { type:'doughnut', data:{labels:pieLabels,datasets:[{data:pieData,backgroundColor:COLORS}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}}}});
+
+  // CTR bar
+  makeChart('chart-market-ctr', { type:'bar', data:{labels:sorted.map(s=>s[0]),datasets:[{label:'CTR %',data:sorted.map(s=>s[1].avg_ctr),backgroundColor:COLORS}]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>v+'%'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+}
+
+// ═══════════════════════════════════════════
+// TAB 2: ANONYMIZED QUERIES
+// ═══════════════════════════════════════════
+function renderAnonymized(market) {
+  market = market || 'all';
+  const anon = DATA.anonymized;
+  const dates = DATA.overview.dates;
+  const dm = DATA.daily_metrics;
+
+  // KPIs
+  let totalAnon=0, totalKnown=0, totalAnonImp=0, totalKnownImp=0;
+  if (market === 'all') {
+    dates.forEach(d => {
+      const ad = dm[d]?.['All Markets'];
+      if(ad) { totalAnon += ad.anon_queries; totalKnown += ad.total_rows - ad.anon_queries; }
+    });
+    // Get impressions from device data
+    Object.values(anon.by_device).forEach(d => { totalAnonImp += d.anon_imp; totalKnownImp += d.known_imp; });
+  } else {
+    dates.forEach(d => {
+      const key = d+'|'+market;
+      const md = anon.by_market_date[key];
+      if(md) {
+        totalAnon += md.anon?.count||0; totalKnown += md.known?.count||0;
+        totalAnonImp += md.anon?.impressions||0; totalKnownImp += md.known?.impressions||0;
+      }
+    });
+  }
+  const total = totalAnon+totalKnown;
+  document.getElementById('anon-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Total Rows</div><div class="value blue">${fmtN(total)}</div></div>
+      <div class="kpi"><div class="label">Anonymized Queries</div><div class="value orange">${fmtN(totalAnon)}</div></div>
+      <div class="kpi"><div class="label">Known Queries</div><div class="value green">${fmtN(totalKnown)}</div></div>
+      <div class="kpi"><div class="label">Anonymization Rate</div><div class="value orange">${pct(totalAnon,total)}%</div></div>
+      <div class="kpi"><div class="label">Anon Impressions</div><div class="value orange">${fmtN(totalAnonImp)}</div></div>
+      <div class="kpi"><div class="label">Known Impressions</div><div class="value green">${fmtN(totalKnownImp)}</div></div>
+    </div>`;
+
+  // Timeline: anon vs known by date
+  const anonByDate = dates.map(d => {
+    if (market === 'all') return dm[d]?.['All Markets']?.anon_queries || 0;
+    return anon.by_market_date[d+'|'+market]?.anon?.count || 0;
+  });
+  const knownByDate = dates.map(d => {
+    if (market === 'all') { const ad=dm[d]?.['All Markets']; return ad ? ad.total_rows-ad.anon_queries : 0; }
+    return anon.by_market_date[d+'|'+market]?.known?.count || 0;
+  });
+  makeChart('chart-anon-timeline', { type:'bar', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:'Anonymized',data:anonByDate,backgroundColor:'#f59e0b80',borderColor:'#f59e0b',borderWidth:1},
+    {label:'Known',data:knownByDate,backgroundColor:'#6366f180',borderColor:'#6366f1',borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{stacked:true,ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{stacked:true,ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Anon % by market
+  const pm = DATA.overview.per_market;
+  const marketNames = Object.keys(pm).sort((a,b)=>pm[b].impressions-pm[a].impressions);
+  const anonPcts = marketNames.map(m => {
+    let a=0,t=0;
+    dates.forEach(d => { const md=anon.by_market_date[d+'|'+m]; if(md){a+=md.anon?.count||0;t+=(md.anon?.count||0)+(md.known?.count||0);} });
+    return t>0 ? +(a/t*100).toFixed(1) : 0;
+  });
+  makeChart('chart-anon-by-market', { type:'bar', data:{labels:marketNames,datasets:[{label:'Anon %',data:anonPcts,backgroundColor:anonPcts.map(v=>v>25?'#ef444480':'#f59e0b80'),borderColor:anonPcts.map(v=>v>25?'#ef4444':'#f59e0b'),borderWidth:1}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>v+'%'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+
+  // By device
+  const devData = anon.by_device;
+  const devLabels = Object.keys(devData);
+  makeChart('chart-anon-device', { type:'bar', data:{labels:devLabels,datasets:[
+    {label:'Anonymized',data:devLabels.map(d=>devData[d].anon),backgroundColor:'#f59e0b80'},
+    {label:'Known',data:devLabels.map(d=>devData[d].known),backgroundColor:'#6366f180'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // By search type
+  const stData = anon.by_search_type;
+  const stLabels = Object.keys(stData);
+  makeChart('chart-anon-search-type', { type:'bar', data:{labels:stLabels,datasets:[
+    {label:'Anonymized',data:stLabels.map(d=>stData[d].anon),backgroundColor:'#f59e0b80'},
+    {label:'Known',data:stLabels.map(d=>stData[d].known),backgroundColor:'#6366f180'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // By country (top 30)
+  const countryAnon = anon.by_country;
+  const countrySorted = Object.entries(countryAnon).sort((a,b)=>(b[1].anon?.count||0)+(b[1].known?.count||0)-((a[1].anon?.count||0)+(a[1].known?.count||0))).slice(0,30);
+  makeChart('chart-anon-country', { type:'bar', data:{labels:countrySorted.map(c=>c[0]),datasets:[
+    {label:'Anonymized',data:countrySorted.map(c=>c[1].anon?.count||0),backgroundColor:'#f59e0b80'},
+    {label:'Known',data:countrySorted.map(c=>c[1].known?.count||0),backgroundColor:'#6366f180'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{stacked:true,ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{stacked:true,ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+}
+document.getElementById('anon-market-filter').addEventListener('change', e => renderAnonymized(e.target.value));
+
+// ═══════════════════════════════════════════
+// TAB 3: URL PERFORMANCE
+// ═══════════════════════════════════════════
+function renderUrls() {
+  const market = document.getElementById('url-market-filter').value;
+  const search = document.getElementById('url-search').value.toLowerCase();
+  const sortBy = document.getElementById('url-sort').value;
+  let urls = DATA.url_performance[market] || [];
+
+  if (search) urls = urls.filter(u => u.url.toLowerCase().includes(search) || (u.path||'').toLowerCase().includes(search));
+  urls = [...urls].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
+
+  let html = '<table><thead><tr><th>URL</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th></tr></thead><tbody>';
+  urls.slice(0,100).forEach(u => {
+    html += `<tr><td class="url-cell" title="${u.url}">${u.path||u.url}</td><td>${fmtN(u.impressions)}</td><td>${fmtN(u.clicks)}</td><td>${u.ctr}%</td><td>${u.avg_position}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('url-table').innerHTML = html;
+
+  // Populate URL trend selector
+  const sel = document.getElementById('url-trend-select');
+  const urlDaily = DATA.url_daily;
+  sel.innerHTML = '<option value="">Select a URL...</option>';
+  Object.keys(urlDaily).slice(0,50).forEach(u => {
+    const o = document.createElement('option'); o.value = u;
+    const path = '/'+u.split('/').slice(3).join('/');
+    o.textContent = path; sel.appendChild(o);
+  });
+}
+document.getElementById('url-market-filter').addEventListener('change', renderUrls);
+document.getElementById('url-search').addEventListener('input', renderUrls);
+document.getElementById('url-sort').addEventListener('change', renderUrls);
+
+document.getElementById('url-trend-select').addEventListener('change', e => {
+  const url = e.target.value;
+  if (!url) return;
+  const daily = DATA.url_daily[url]?.daily || {};
+  const dates = DATA.overview.dates;
+  makeChart('chart-url-trend', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
+    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
+});
+
+// ═══════════════════════════════════════════
+// TAB 4: KEYWORD PERFORMANCE
+// ═══════════════════════════════════════════
+function renderKeywords() {
+  const market = document.getElementById('kw-market-filter').value;
+  const search = document.getElementById('kw-search').value.toLowerCase();
+  const sortBy = document.getElementById('kw-sort').value;
+  let kws = DATA.keyword_performance[market] || [];
+
+  if (search) kws = kws.filter(k => k.query.toLowerCase().includes(search));
+  kws = [...kws].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
+
+  let html = '<table><thead><tr><th>Keyword</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>URLs</th></tr></thead><tbody>';
+  kws.slice(0,100).forEach(k => {
+    html += `<tr><td>${k.query}</td><td>${fmtN(k.impressions)}</td><td>${fmtN(k.clicks)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.url_count}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('kw-table').innerHTML = html;
+
+  // Keyword trend selector
+  const sel = document.getElementById('kw-trend-select');
+  const kwDaily = DATA.keyword_daily;
+  sel.innerHTML = '<option value="">Select a keyword...</option>';
+  Object.keys(kwDaily).slice(0,50).forEach(q => {
+    const o = document.createElement('option'); o.value = q; o.textContent = q; sel.appendChild(o);
+  });
+}
+document.getElementById('kw-market-filter').addEventListener('change', renderKeywords);
+document.getElementById('kw-search').addEventListener('input', renderKeywords);
+document.getElementById('kw-sort').addEventListener('change', renderKeywords);
+
+document.getElementById('kw-trend-select').addEventListener('change', e => {
+  const q = e.target.value;
+  if (!q) return;
+  const daily = DATA.keyword_daily[q] || {};
+  const dates = DATA.overview.dates;
+  makeChart('chart-kw-trend', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
+    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
+});
+
+// ═══════════════════════════════════════════
+// TAB 5: COUNTRY OVERVIEW
+// ═══════════════════════════════════════════
+function renderCountries() {
+  const sortBy = document.getElementById('country-sort').value;
+  let countries = DATA.country_data.summary;
+  countries = [...countries].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
+
+  // Top 30 bar chart
+  const top30 = countries.slice(0,30);
+  makeChart('chart-country-bar', { type:'bar', data:{labels:top30.map(c=>c.country),datasets:[{label:'Impressions',data:top30.map(c=>c.impressions),backgroundColor:COLORS.concat(COLORS)}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+
+  // Table
+  let html = '<table><thead><tr><th>Country</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>Anon %</th><th>Rows</th></tr></thead><tbody>';
+  countries.forEach(c => {
+    html += `<tr><td>${c.country}</td><td>${fmtN(c.impressions)}</td><td>${fmtN(c.clicks)}</td><td>${c.ctr}%</td><td>${c.avg_position}</td><td><span class="badge ${c.anon_pct>25?'badge-orange':'badge-blue'}">${c.anon_pct}%</span></td><td>${fmtN(c.total_rows)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('country-table').innerHTML = html;
+
+  // Country pills for daily chart
+  const pillContainer = document.getElementById('country-pills');
+  const topCountries = countries.slice(0,15).map(c=>c.country);
+  const activeCountries = new Set(topCountries.slice(0,5));
+  pillContainer.innerHTML = '';
+  topCountries.forEach(c => {
+    const pill = document.createElement('div');
+    pill.className = 'pill' + (activeCountries.has(c) ? ' active' : '');
+    pill.textContent = c;
+    pill.addEventListener('click', () => { pill.classList.toggle('active'); renderCountryDaily(); });
+    pillContainer.appendChild(pill);
+  });
+  renderCountryDaily();
+}
+
+function renderCountryDaily() {
+  const active = [...document.querySelectorAll('#country-pills .pill.active')].map(p=>p.textContent);
+  const dates = DATA.overview.dates;
+  const daily = DATA.country_data.daily;
+  const datasets = active.map((c,i) => ({
+    label: c, data: dates.map(d => daily[d]?.[c]?.impressions || 0),
+    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
+  }));
+  makeChart('chart-country-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+}
+document.getElementById('country-sort').addEventListener('change', renderCountries);
+
+// ═══════════════════════════════════════════
+// TAB 6: DOMAIN COMPARISON
+// ═══════════════════════════════════════════
+function renderDomains() {
+  const a = document.getElementById('domain-a').value;
+  const b = document.getElementById('domain-b').value;
+  const pm = DATA.overview.per_market;
+  const da = pm[a] || {};
+  const db = pm[b] || {};
+
+  const metrics = [
+    {label:'Impressions',key:'impressions'},
+    {label:'Clicks',key:'clicks'},
+    {label:'CTR',key:'avg_ctr',suffix:'%'},
+    {label:'Avg Position',key:'avg_position',invert:true},
+    {label:'Keywords',key:'unique_keywords'},
+    {label:'URLs',key:'unique_urls'},
+  ];
+
+  let html = `<div class="comp-card"><h4>${a}</h4>`;
+  metrics.forEach(m => {
+    const va = da[m.key]||0;
+    html += `<div class="comp-metric"><span class="comp-label">${m.label}</span><span class="comp-value">${typeof va==='number'&&va>100?fmtN(va):va}${m.suffix||''}</span></div>`;
+  });
+  html += '</div><div class="vs-badge">VS</div>';
+  html += `<div class="comp-card"><h4>${b}</h4>`;
+  metrics.forEach(m => {
+    const vb = db[m.key]||0;
+    const va = da[m.key]||0;
+    const d = delta(vb, va);
+    const cls = m.invert ? (d.val<0?'up':'down') : d.cls;
+    html += `<div class="comp-metric"><span class="comp-label">${m.label}</span><span class="comp-value">${typeof vb==='number'&&vb>100?fmtN(vb):vb}${m.suffix||''} <span class="delta ${cls}">${d.sign}${d.val}%</span></span></div>`;
+  });
+  html += '</div>';
+  document.getElementById('domain-comparison').innerHTML = html;
+
+  // Daily comparison charts
+  const dates = DATA.overview.dates;
+  const dm = DATA.daily_metrics;
+  makeChart('chart-domain-comp-imp', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:a,data:dates.map(d=>dm[d]?.[a]?.impressions||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:3},
+    {label:b,data:dates.map(d=>dm[d]?.[b]?.impressions||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:3},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  makeChart('chart-domain-comp-clicks', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:a,data:dates.map(d=>dm[d]?.[a]?.clicks||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:3},
+    {label:b,data:dates.map(d=>dm[d]?.[b]?.clicks||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:3},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // All markets ranked
+  const allMarkets = Object.entries(pm).sort((a,b)=>b[1].impressions-a[1].impressions);
+  makeChart('chart-all-markets-rank', { type:'bar', data:{labels:allMarkets.map(m=>m[0]),datasets:[
+    {label:'Impressions',data:allMarkets.map(m=>m[1].impressions),backgroundColor:allMarkets.map(m=>m[0]===a?'#6366f1':m[0]===b?'#22c55e':'#2a2d3a80'),borderColor:allMarkets.map(m=>m[0]===a?'#6366f1':m[0]===b?'#22c55e':'#2a2d3a'),borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+}
+document.getElementById('domain-a').addEventListener('change', renderDomains);
+document.getElementById('domain-b').addEventListener('change', renderDomains);
+
+// ═══════════════════════════════════════════
+// TAB 7: DEVICE & SEARCH TYPE
+// ═══════════════════════════════════════════
+function renderDevices() {
+  const market = document.getElementById('dev-market-filter').value;
+  const ds = DATA.device_search;
+  const dates = DATA.overview.dates;
+
+  // Device pie
+  let deviceData;
+  if (market === 'all') {
+    deviceData = {};
+    Object.values(ds.by_market_device).forEach(md => {
+      Object.entries(md).forEach(([dev,d]) => {
+        if(!deviceData[dev]) deviceData[dev]={impressions:0,clicks:0};
+        deviceData[dev].impressions += d.impressions;
+        deviceData[dev].clicks += d.clicks;
+      });
+    });
+  } else {
+    deviceData = ds.by_market_device[market] || {};
+  }
+  const devLabels = Object.keys(deviceData);
+  makeChart('chart-device-pie', { type:'doughnut', data:{labels:devLabels,datasets:[{data:devLabels.map(d=>deviceData[d].impressions),backgroundColor:['#6366f1','#22c55e','#f59e0b']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
+
+  // Search type pie
+  let searchData;
+  if (market === 'all') {
+    searchData = {};
+    Object.values(ds.by_market_search).forEach(ms => {
+      Object.entries(ms).forEach(([st,d]) => {
+        if(!searchData[st]) searchData[st]={impressions:0,clicks:0};
+        searchData[st].impressions += d.impressions;
+        searchData[st].clicks += d.clicks;
+      });
+    });
+  } else {
+    searchData = ds.by_market_search[market] || {};
+  }
+  const stLabels = Object.keys(searchData);
+  makeChart('chart-search-pie', { type:'doughnut', data:{labels:stLabels,datasets:[{data:stLabels.map(s=>searchData[s].impressions),backgroundColor:['#3b82f6','#ec4899','#06b6d4']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
+
+  // Daily device
+  const dailyDev = ds.daily_device;
+  const devices = ['DESKTOP','MOBILE','TABLET'];
+  makeChart('chart-device-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({
+    label:dev, data:dates.map(d=>dailyDev[d]?.[dev]?.impressions||0),
+    borderColor:['#6366f1','#22c55e','#f59e0b'][i], tension:0.3, borderWidth:2, pointRadius:2,
+  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Daily search type
+  const dailySt = ds.daily_search;
+  const stypes = ['WEB','IMAGE','VIDEO'];
+  makeChart('chart-search-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({
+    label:st, data:dates.map(d=>dailySt[d]?.[st]?.impressions||0),
+    borderColor:['#3b82f6','#ec4899','#06b6d4'][i], tension:0.3, borderWidth:2, pointRadius:2,
+  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Device by market table
+  const allMarkets = Object.keys(ds.by_market_device).sort();
+  let html = '<table><thead><tr><th>Market</th><th>Desktop Imp</th><th>Desktop CTR</th><th>Mobile Imp</th><th>Mobile CTR</th><th>Tablet Imp</th><th>Tablet CTR</th></tr></thead><tbody>';
+  allMarkets.forEach(m => {
+    const md = ds.by_market_device[m];
+    html += `<tr><td>${m}</td>`;
+    devices.forEach(dev => {
+      const d = md[dev] || {impressions:0,ctr:0};
+      html += `<td>${fmtN(d.impressions)}</td><td>${d.ctr||0}%</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('device-market-table').innerHTML = html;
+}
+document.getElementById('dev-market-filter').addEventListener('change', renderDevices);
+
+// ═══════════════════════════════════════════
+// TAB 8: DATE COMPARISON
+// ═══════════════════════════════════════════
+function setupComparison() {
+  document.getElementById('comp-preset').addEventListener('change', e => {
+    const show = e.target.value === 'custom';
+    ['comp-custom-a','comp-custom-a2','comp-custom-b','comp-custom-b2'].forEach(id => {
+      document.getElementById(id).style.display = show ? '' : 'none';
+    });
+  });
+  runComparison();
+}
+
+function runComparison() {
+  const preset = document.getElementById('comp-preset').value;
+  const dates = DATA.overview.dates;
+  let periodA, periodB, labelA, labelB;
+
+  if (preset === 'last7vs7') {
+    periodA = dates.slice(-7);
+    periodB = dates.slice(0, Math.min(6, dates.length));
+    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
+    labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
+  } else if (preset === 'last3vs3') {
+    periodA = dates.slice(-3);
+    periodB = dates.slice(-6, -3);
+    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
+    labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
+  } else {
+    const af = document.getElementById('comp-a-from').value;
+    const at = document.getElementById('comp-a-to').value;
+    const bf = document.getElementById('comp-b-from').value;
+    const bt = document.getElementById('comp-b-to').value;
+    if (!af||!at||!bf||!bt) { document.getElementById('comp-results').innerHTML='<div class="card">Please fill in all date fields.</div>'; return; }
+    periodA = dates.filter(d => d >= af && d <= at);
+    periodB = dates.filter(d => d >= bf && d <= bt);
+    labelA = `${af} to ${at}`;
+    labelB = `${bf} to ${bt}`;
+  }
+
+  const dm = DATA.daily_metrics;
+  const markets = Object.keys(DATA.overview.per_market);
+
+  // Aggregate periods
+  function aggPeriod(period) {
+    const result = {total:{impressions:0,clicks:0,sum_pos:0,anon:0,rows:0}, markets:{}};
+    period.forEach(d => {
+      if(!dm[d]) return;
+      const all = dm[d]['All Markets'];
+      if(all) { result.total.impressions+=all.impressions; result.total.clicks+=all.clicks; result.total.anon+=all.anon_queries; result.total.rows+=all.total_rows; }
+      markets.forEach(m => {
+        if(!dm[d][m]) return;
+        if(!result.markets[m]) result.markets[m]={impressions:0,clicks:0};
+        result.markets[m].impressions += dm[d][m].impressions;
+        result.markets[m].clicks += dm[d][m].clicks;
+      });
+    });
+    result.total.ctr = result.total.impressions>0 ? +(result.total.clicks/result.total.impressions*100).toFixed(2) : 0;
+    result.total.anon_pct = result.total.rows>0 ? +(result.total.anon/result.total.rows*100).toFixed(1) : 0;
+    return result;
+  }
+
+  const a = aggPeriod(periodA);
+  const b = aggPeriod(periodB);
+
+  function deltaHtml(va,vb,invert) {
+    if(vb===0) return '';
+    const d = ((va-vb)/vb*100).toFixed(1);
+    const cls = invert ? (d<0?'up':'down') : (d>0?'up':'down');
+    return `<span class="delta ${cls}">${d>0?'+':''}${d}%</span>`;
+  }
+
+  let html = `
+  <div class="comparison-row">
+    <div class="comp-card">
+      <h4>Period A: ${labelA} (${periodA.length} days)</h4>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(a.total.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(a.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${a.total.ctr}%</span></div>
+      <div class="comp-metric"><span class="comp-label">Anonymized %</span><span class="comp-value">${a.total.anon_pct}%</span></div>
+    </div>
+    <div class="vs-badge">VS</div>
+    <div class="comp-card">
+      <h4>Period B: ${labelB} (${periodB.length} days)</h4>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(b.total.impressions)} ${deltaHtml(a.total.impressions,b.total.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(b.total.clicks)} ${deltaHtml(a.total.clicks,b.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${b.total.ctr}% ${deltaHtml(a.total.ctr,b.total.ctr)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Anonymized %</span><span class="comp-value">${b.total.anon_pct}%</span></div>
+    </div>
+  </div>`;
+
+  // Per-market comparison table
+  html += '<div class="card" style="margin-top:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Imp (A)</th><th>Imp (B)</th><th>Change</th><th>Clicks (A)</th><th>Clicks (B)</th><th>Change</th></tr></thead><tbody>';
+  const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.impressions||0) - (a.markets[x]?.impressions||0));
+  sortedMarkets.forEach(m => {
+    const ma = a.markets[m] || {impressions:0,clicks:0};
+    const mb = b.markets[m] || {impressions:0,clicks:0};
+    html += `<tr><td>${m}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td></tr>`;
+  });
+  html += '</tbody></table></div></div>';
+
+  document.getElementById('comp-results').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════
+// TAB 9: SERP FEATURES
+// ═══════════════════════════════════════════
+function renderSerpFeatures() {
+  const sf = DATA.serp_features;
+
+  // Bar chart
+  const features = Object.entries(sf.summary).sort((a,b) => b[1].rows - a[1].rows);
+  makeChart('chart-serp-bar', { type:'bar', data:{labels:features.map(f=>f[0]),datasets:[
+    {label:'Rows with Feature',data:features.map(f=>f[1].rows),backgroundColor:'#6366f180',borderColor:'#6366f1',borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+
+  // Summary table
+  let html = '<table><thead><tr><th>Feature</th><th>Rows</th><th>Impressions</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>';
+  features.forEach(([name,d]) => {
+    html += `<tr><td>${name}</td><td>${fmtN(d.rows)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td><td>${d.ctr}%</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('serp-table').innerHTML = html;
+
+  // Per market
+  document.getElementById('serp-market-filter').addEventListener('change', e => {
+    const m = e.target.value;
+    const mf = sf.by_market[m] || {};
+    const sorted = Object.entries(mf).sort((a,b) => b[1].rows - a[1].rows);
+    let h = '<table><thead><tr><th>Feature</th><th>Rows</th><th>Impressions</th><th>Clicks</th></tr></thead><tbody>';
+    sorted.forEach(([name,d]) => {
+      h += `<tr><td>${name}</td><td>${fmtN(d.rows)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td></tr>`;
+    });
+    h += '</tbody></table>';
+    document.getElementById('serp-market-table').innerHTML = h;
+  });
+}
+
+// ─── Boot ───
+loadAll();
+</script>
+</body>
+</html>
