@@ -1,39 +1,49 @@
 """
-Preprocesses the WoodUpp GSC data into optimized JSON files for the dashboard.
-Handles domain detection, country mapping, and aggregation.
+Preprocesses WoodUpp GSC data into a standalone HTML dashboard.
+Reads the daily-updated CSV, merges with frozen historical JSON data,
+and generates a self-contained index.html with all data embedded.
+
+Usage:
+    python preprocess.py                          # Use default CSV path
+    python preprocess.py /path/to/csv_file.csv    # Custom CSV path
 """
 import pandas as pd
 import json
+import sys
 import os
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
+SCRIPT_DIR = Path(__file__).parent
+DATA_DIR = SCRIPT_DIR / "data"
+HISTORICAL_DIR = DATA_DIR / "historical"
+TEMPLATE_HTML = SCRIPT_DIR / "template.html"
+OUTPUT_HTML = SCRIPT_DIR / "index.html"
 
-SOURCE_CSV = Path(__file__).parent.parent / "woodupp_url_impressions.csv"
+# Default CSV path (Windows) — override via command-line argument
+DEFAULT_CSV = Path(r"C:\Users\sos\Desktop\Claude\Woodupp\woodupp_url_impressions.csv")
 
 # Map site_url / country_code to readable market names
 DOMAIN_MARKET_MAP = {
-    "ae": {"domain": "woodupp.ae", "market": "UAE", "flag": "\ud83c\udde6\ud83c\uddea"},
-    "at": {"domain": "woodupp.at", "market": "Austria", "flag": "\ud83c\udde6\ud83c\uddf9"},
-    "au": {"domain": "woodupp.au", "market": "Australia", "flag": "\ud83c\udde6\ud83c\uddfa"},
-    "be": {"domain": "woodupp.be", "market": "Belgium", "flag": "\ud83c\udde7\ud83c\uddea"},
-    "ch": {"domain": "woodupp.ch", "market": "Switzerland", "flag": "\ud83c\udde8\ud83c\udded"},
-    "couk": {"domain": "woodupp.co.uk", "market": "United Kingdom", "flag": "\ud83c\uddec\ud83c\udde7"},
-    "coza": {"domain": "woodupp.co.za", "market": "South Africa", "flag": "\ud83c\uddff\ud83c\udde6"},
-    "com_na": {"domain": "woodupp.com.na", "market": "Namibia", "flag": "\ud83c\uddf3\ud83c\udde6"},
-    "com": {"domain": "woodupp.com", "market": "Global (.com)", "flag": "\ud83c\udf10"},
-    "us": {"domain": "woodupp.com/us", "market": "USA", "flag": "\ud83c\uddfa\ud83c\uddf8"},
-    "de": {"domain": "woodupp.de", "market": "Germany", "flag": "\ud83c\udde9\ud83c\uddea"},
-    "dk": {"domain": "woodupp.dk", "market": "Denmark", "flag": "\ud83c\udde9\ud83c\uddf0"},
-    "es": {"domain": "woodupp.es", "market": "Spain", "flag": "\ud83c\uddea\ud83c\uddf8"},
-    "fr": {"domain": "woodupp.fr", "market": "France", "flag": "\ud83c\uddeb\ud83c\uddf7"},
-    "it": {"domain": "woodupp.it", "market": "Italy", "flag": "\ud83c\uddee\ud83c\uddf9"},
-    "nl": {"domain": "woodupp.nl", "market": "Netherlands", "flag": "\ud83c\uddf3\ud83c\uddf1"},
-    "no": {"domain": "woodupp.no", "market": "Norway", "flag": "\ud83c\uddf3\ud83c\uddf4"},
-    "pl": {"domain": "woodupp.pl", "market": "Poland", "flag": "\ud83c\uddf5\ud83c\uddf1"},
-    "pt": {"domain": "woodupp.pt", "market": "Portugal", "flag": "\ud83c\uddf5\ud83c\uddf9"},
-    "se": {"domain": "woodupp.se", "market": "Sweden", "flag": "\ud83c\uddf8\ud83c\uddea"},
+    "ae": {"domain": "woodupp.ae", "market": "UAE", "flag": "\U0001f1e6\U0001f1ea"},
+    "at": {"domain": "woodupp.at", "market": "Austria", "flag": "\U0001f1e6\U0001f1f9"},
+    "au": {"domain": "woodupp.au", "market": "Australia", "flag": "\U0001f1e6\U0001f1fa"},
+    "be": {"domain": "woodupp.be", "market": "Belgium", "flag": "\U0001f1e7\U0001f1ea"},
+    "ch": {"domain": "woodupp.ch", "market": "Switzerland", "flag": "\U0001f1e8\U0001f1ed"},
+    "couk": {"domain": "woodupp.co.uk", "market": "United Kingdom", "flag": "\U0001f1ec\U0001f1e7"},
+    "coza": {"domain": "woodupp.co.za", "market": "South Africa", "flag": "\U0001f1ff\U0001f1e6"},
+    "com_na": {"domain": "woodupp.com.na", "market": "Namibia", "flag": "\U0001f1f3\U0001f1e6"},
+    "com": {"domain": "woodupp.com", "market": "Global (.com)", "flag": "\U0001f310"},
+    "us": {"domain": "woodupp.com/us", "market": "USA", "flag": "\U0001f1fa\U0001f1f8"},
+    "de": {"domain": "woodupp.de", "market": "Germany", "flag": "\U0001f1e9\U0001f1ea"},
+    "dk": {"domain": "woodupp.dk", "market": "Denmark", "flag": "\U0001f1e9\U0001f1f0"},
+    "es": {"domain": "woodupp.es", "market": "Spain", "flag": "\U0001f1ea\U0001f1f8"},
+    "fr": {"domain": "woodupp.fr", "market": "France", "flag": "\U0001f1eb\U0001f1f7"},
+    "it": {"domain": "woodupp.it", "market": "Italy", "flag": "\U0001f1ee\U0001f1f9"},
+    "nl": {"domain": "woodupp.nl", "market": "Netherlands", "flag": "\U0001f1f3\U0001f1f1"},
+    "no": {"domain": "woodupp.no", "market": "Norway", "flag": "\U0001f1f3\U0001f1f4"},
+    "pl": {"domain": "woodupp.pl", "market": "Poland", "flag": "\U0001f1f5\U0001f1f1"},
+    "pt": {"domain": "woodupp.pt", "market": "Portugal", "flag": "\U0001f1f5\U0001f1f9"},
+    "se": {"domain": "woodupp.se", "market": "Sweden", "flag": "\U0001f1f8\U0001f1ea"},
 }
 
 # ISO 3-letter to readable country name for visitor countries
@@ -59,13 +69,15 @@ COUNTRY_ISO_MAP = {
     "ukr": "Ukraine", "rus": "Russia", "blr": "Belarus", "srb": "Serbia",
     "bih": "Bosnia", "mkd": "North Macedonia", "alb": "Albania", "mne": "Montenegro",
     "geo": "Georgia", "arm": "Armenia", "aze": "Azerbaijan", "kaz": "Kazakhstan",
-    "uzb": "Uzbekistan", "prt": "Portugal", "xkk": "Kosovo",
+    "uzb": "Uzbekistan", "xkk": "Kosovo",
 }
 
 
-def load_and_clean():
-    print("Loading CSV...")
-    df = pd.read_csv(SOURCE_CSV, dtype={
+# ─── CSV Loading & Cleaning ───
+
+def load_and_clean(csv_path):
+    print(f"Loading CSV from {csv_path}...")
+    df = pd.read_csv(csv_path, dtype={
         "is_anonymized_query": str,
         "is_anonymized_discover": str,
         "impressions": int,
@@ -73,38 +85,30 @@ def load_and_clean():
     })
     print(f"  Loaded {len(df):,} rows")
 
-    # Convert types
     df["data_date"] = pd.to_datetime(df["data_date"]).dt.strftime("%Y-%m-%d")
     df["is_anonymized_query"] = df["is_anonymized_query"].str.lower() == "true"
     df["is_anonymized_discover"] = df["is_anonymized_discover"].str.lower() == "true"
 
-    # Add market label from country_code
     df["market"] = df["country_code"].map(lambda x: DOMAIN_MARKET_MAP.get(x, {}).get("market", x))
     df["domain"] = df["country_code"].map(lambda x: DOMAIN_MARKET_MAP.get(x, {}).get("domain", x))
-
-    # Visitor country readable name
     df["visitor_country"] = df["country"].map(lambda x: COUNTRY_ISO_MAP.get(x, x))
 
-    # Average position (sum_position / impressions)
     df["avg_position"] = (df["sum_position"] / df["impressions"]).round(1)
     df.loc[df["impressions"] == 0, "avg_position"] = 0
 
-    # CTR
     df["ctr"] = (df["clicks"] / df["impressions"] * 100).round(2)
     df.loc[df["impressions"] == 0, "ctr"] = 0
 
-    # URL path (strip domain)
     df["url_path"] = df["url"].apply(lambda u: "/" + "/".join(u.split("/")[3:]) if isinstance(u, str) and len(u.split("/")) > 3 else "/")
 
     print(f"  Date range: {df['data_date'].min()} to {df['data_date'].max()}")
     print(f"  Markets: {df['market'].nunique()}")
-    print(f"  Visitor countries: {df['visitor_country'].nunique()}")
-
     return df
 
 
+# ─── Data Generation Functions ───
+
 def generate_overview(df):
-    """Global KPIs and summary stats."""
     dates = sorted(df["data_date"].unique().tolist())
     markets = sorted(df["market"].unique().tolist())
 
@@ -145,7 +149,6 @@ def generate_overview(df):
 
 
 def generate_daily_metrics(df):
-    """Daily aggregated metrics by market."""
     daily = df.groupby(["data_date", "market"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -173,7 +176,6 @@ def generate_daily_metrics(df):
             "anon_pct": float(row["anon_pct"]) if pd.notna(row["anon_pct"]) else 0,
         }
 
-    # Also aggregate "All Markets" totals per day
     daily_all = df.groupby("data_date").agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -203,8 +205,6 @@ def generate_daily_metrics(df):
 
 
 def generate_anonymized_data(df):
-    """Anonymized query analysis by market, country, date, device, search_type."""
-    # By market and date
     anon_by_market_date = df.groupby(["data_date", "market", "is_anonymized_query"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -224,7 +224,6 @@ def generate_anonymized_data(df):
             "count": int(row["count"]),
         }
 
-    # By visitor country
     anon_country = df.groupby(["visitor_country", "is_anonymized_query"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -242,7 +241,6 @@ def generate_anonymized_data(df):
             "count": int(row["count"]),
         }
 
-    # By device
     anon_device = df.groupby(["device", "is_anonymized_query"]).agg(
         count=("impressions", "count"),
         impressions=("impressions", "sum"),
@@ -258,7 +256,6 @@ def generate_anonymized_data(df):
             result["by_device"][d]["known"] = int(row["count"])
             result["by_device"][d]["known_imp"] = int(row["impressions"])
 
-    # By search type
     anon_st = df.groupby(["search_type", "is_anonymized_query"]).agg(
         count=("impressions", "count"),
         impressions=("impressions", "sum"),
@@ -278,8 +275,6 @@ def generate_anonymized_data(df):
 
 
 def generate_url_performance(df):
-    """Top URLs by impressions/clicks per market."""
-    # Filter to non-anonymized for richer data, but aggregate all
     url_agg = df.groupby(["market", "url", "url_path"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -303,7 +298,6 @@ def generate_url_performance(df):
             "query_count": int(row["query_count"]),
         } for _, row in mdf.iterrows()]
 
-    # All markets combined
     url_all = df.groupby(["url", "url_path", "market"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -332,7 +326,6 @@ def generate_url_performance(df):
 
 
 def generate_keyword_performance(df):
-    """Top keywords by impressions/clicks per market (non-anonymized only)."""
     kw_df = df[(~df["is_anonymized_query"]) & (df["query"].notna()) & (df["query"] != "")]
 
     kw_agg = kw_df.groupby(["market", "query"]).agg(
@@ -357,7 +350,6 @@ def generate_keyword_performance(df):
             "url_count": int(row["url_count"]),
         } for _, row in mdf.iterrows()]
 
-    # All markets
     kw_all = kw_df.groupby("query").agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -382,7 +374,6 @@ def generate_keyword_performance(df):
 
 
 def generate_country_data(df):
-    """Visitor country analysis - where impressions/clicks come from."""
     country_agg = df.groupby(["visitor_country", "country"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -415,7 +406,6 @@ def generate_country_data(df):
         "total_rows": int(row["total_rows"]),
     } for _, row in country_summary.iterrows()]
 
-    # Country by market breakdown
     country_by_market = df.groupby(["visitor_country", "market"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -431,7 +421,6 @@ def generate_country_data(df):
             "clicks": int(row["clicks"]),
         }
 
-    # Daily by top visitor countries
     top_countries = [r["country"] for r in result[:30]]
     daily_country = df[df["visitor_country"].isin(top_countries)].groupby(["data_date", "visitor_country"]).agg(
         impressions=("impressions", "sum"),
@@ -461,8 +450,6 @@ def generate_country_data(df):
 
 
 def generate_device_search_data(df):
-    """Device and search type breakdowns."""
-    # By market and device
     dev_market = df.groupby(["market", "device"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -483,7 +470,6 @@ def generate_device_search_data(df):
             "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
         }
 
-    # By market and search type
     st_market = df.groupby(["market", "search_type"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -504,7 +490,6 @@ def generate_device_search_data(df):
             "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
         }
 
-    # Daily by device
     daily_dev = df.groupby(["data_date", "device"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -520,7 +505,6 @@ def generate_device_search_data(df):
             "clicks": int(row["clicks"]),
         }
 
-    # Daily by search type
     daily_st = df.groupby(["data_date", "search_type"]).agg(
         impressions=("impressions", "sum"),
         clicks=("clicks", "sum"),
@@ -545,13 +529,10 @@ def generate_device_search_data(df):
 
 
 def generate_search_features(df):
-    """SERP feature analysis."""
     feature_cols = [c for c in df.columns if c.startswith("is_") and c not in ["is_anonymized_query", "is_anonymized_discover"]]
 
-    # Aggregate per feature across all data
     feature_summary = {}
     for col in feature_cols:
-        # Handle mixed types - convert to boolean properly
         mask = df[col].astype(str).str.lower() == "true"
         count = int(mask.sum())
         if count > 0:
@@ -565,7 +546,6 @@ def generate_search_features(df):
                 "ctr": round(click_sum / imp_sum * 100, 2) if imp_sum > 0 else 0,
             }
 
-    # Per market
     feature_by_market = {}
     for market in df["market"].unique():
         mdf = df[df["market"] == market]
@@ -590,8 +570,6 @@ def generate_search_features(df):
 
 
 def generate_url_daily(df):
-    """Daily performance for top URLs across all markets."""
-    # Get top 50 URLs overall
     top_urls = df.groupby("url")["impressions"].sum().nlargest(50).index.tolist()
 
     url_daily = df[df["url"].isin(top_urls)].groupby(["data_date", "url", "market"]).agg(
@@ -619,9 +597,7 @@ def generate_url_daily(df):
 
 
 def generate_keyword_daily(df):
-    """Daily performance for top keywords."""
     kw_df = df[(~df["is_anonymized_query"]) & (df["query"].notna()) & (df["query"] != "")]
-
     top_kws = kw_df.groupby("query")["impressions"].sum().nlargest(50).index.tolist()
 
     kw_daily = kw_df[kw_df["query"].isin(top_kws)].groupby(["data_date", "query"]).agg(
@@ -646,70 +622,195 @@ def generate_keyword_daily(df):
     return result
 
 
+# ─── Historical Data Loading & Merging ───
+
+def load_historical():
+    """Load frozen historical JSON data from data/historical/."""
+    historical = {}
+    data_files = [
+        "overview", "daily_metrics", "anonymized", "url_performance",
+        "keyword_performance", "country_data", "device_search",
+        "serp_features", "url_daily", "keyword_daily",
+    ]
+    for name in data_files:
+        path = HISTORICAL_DIR / f"{name}.json"
+        if path.exists():
+            with open(path) as f:
+                historical[name] = json.load(f)
+            print(f"  Loaded historical {name}.json")
+    return historical
+
+
+def merge_date_keyed(new_data, historical_data):
+    """Merge date-keyed dicts: historical fills gaps, new data takes precedence."""
+    if not historical_data:
+        return new_data
+    merged = dict(historical_data)
+    merged.update(new_data)
+    return merged
+
+
+def merge_nested_date_keyed(new_data, historical_data):
+    """Merge nested date-keyed data (e.g., url_daily: url -> daily -> date -> metrics).
+    For each top-level key, merge the date entries."""
+    if not historical_data:
+        return new_data
+    merged = dict(historical_data)
+    for key, value in new_data.items():
+        if key in merged:
+            if isinstance(value, dict) and "daily" in value:
+                # url_daily format: {url: {market, daily: {date: metrics}}}
+                merged[key]["daily"] = merge_date_keyed(
+                    value.get("daily", {}),
+                    merged[key].get("daily", {})
+                )
+                merged[key]["market"] = value.get("market", merged[key].get("market"))
+            elif isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
+                # keyword_daily format: {keyword: {date: metrics}}
+                merged[key] = merge_date_keyed(value, merged[key])
+            else:
+                merged[key] = value
+        else:
+            merged[key] = value
+    return merged
+
+
+def merge_with_historical(new_data, historical):
+    """Merge all datasets: CSV data takes precedence, historical fills date gaps."""
+    if not historical:
+        return new_data
+
+    merged = {}
+
+    # Date-keyed datasets: merge by date (historical fills gaps)
+    merged["daily_metrics"] = merge_date_keyed(
+        new_data["daily_metrics"], historical.get("daily_metrics", {}))
+
+    # Anonymized: merge by_market_date keys
+    merged_anon = dict(new_data["anonymized"])
+    hist_anon = historical.get("anonymized", {})
+    if hist_anon.get("by_market_date"):
+        merged_bmd = dict(hist_anon["by_market_date"])
+        merged_bmd.update(new_data["anonymized"].get("by_market_date", {}))
+        merged_anon["by_market_date"] = merged_bmd
+    merged["anonymized"] = merged_anon
+
+    # Country data: merge daily
+    merged_country = dict(new_data["country_data"])
+    hist_country = historical.get("country_data", {})
+    if hist_country.get("daily"):
+        merged_country["daily"] = merge_date_keyed(
+            new_data["country_data"].get("daily", {}), hist_country["daily"])
+    merged["country_data"] = merged_country
+
+    # Device/search: merge daily_device and daily_search
+    merged_ds = dict(new_data["device_search"])
+    hist_ds = historical.get("device_search", {})
+    if hist_ds.get("daily_device"):
+        merged_ds["daily_device"] = merge_date_keyed(
+            new_data["device_search"].get("daily_device", {}), hist_ds["daily_device"])
+    if hist_ds.get("daily_search"):
+        merged_ds["daily_search"] = merge_date_keyed(
+            new_data["device_search"].get("daily_search", {}), hist_ds["daily_search"])
+    merged["device_search"] = merged_ds
+
+    # URL daily and keyword daily: nested merge
+    merged["url_daily"] = merge_nested_date_keyed(
+        new_data["url_daily"], historical.get("url_daily", {}))
+    merged["keyword_daily"] = merge_nested_date_keyed(
+        new_data["keyword_daily"], historical.get("keyword_daily", {}))
+
+    # Update overview dates from merged daily_metrics
+    merged["overview"] = dict(new_data["overview"])
+    merged["overview"]["dates"] = sorted(merged["daily_metrics"].keys())
+
+    # Aggregate datasets use CSV-derived values (most complete)
+    merged["url_performance"] = new_data["url_performance"]
+    merged["keyword_performance"] = new_data["keyword_performance"]
+    merged["serp_features"] = new_data["serp_features"]
+
+    return merged
+
+
+# ─── HTML Generation ───
+
+def generate_html(all_data):
+    """Read template.html and inject data to create a standalone index.html."""
+    print("Reading template.html...")
+    with open(TEMPLATE_HTML, "r", encoding="utf-8") as f:
+        template = f.read()
+
+    # Build the data injection block
+    data_keys = [
+        "overview", "daily_metrics", "anonymized", "url_performance",
+        "keyword_performance", "country_data", "device_search",
+        "serp_features", "url_daily", "keyword_daily",
+    ]
+    lines = []
+    for key in data_keys:
+        lines.append(f"DATA['{key}'] = {json.dumps(all_data[key], ensure_ascii=False)};")
+    injection = "\n".join(lines)
+
+    # Replace the placeholder
+    marker = "// __DATA_INJECTION_POINT__"
+    if marker not in template:
+        raise RuntimeError(f"Marker '{marker}' not found in template.html")
+    html = template.replace(marker, injection)
+
+    print(f"Writing {OUTPUT_HTML}...")
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    size_mb = os.path.getsize(OUTPUT_HTML) / (1024 * 1024)
+    print(f"  Generated index.html ({size_mb:.1f} MB)")
+
+
+# ─── Main ───
+
 def main():
-    df = load_and_clean()
+    # Determine CSV path
+    if len(sys.argv) > 1:
+        csv_path = Path(sys.argv[1])
+    else:
+        csv_path = DEFAULT_CSV
 
-    print("\nGenerating overview...")
-    overview = generate_overview(df)
-    with open(DATA_DIR / "overview.json", "w") as f:
-        json.dump(overview, f)
-    print(f"  Saved overview.json")
+    # Load historical data
+    print("Loading historical data...")
+    historical = load_historical()
 
-    print("Generating daily metrics...")
-    daily = generate_daily_metrics(df)
-    with open(DATA_DIR / "daily_metrics.json", "w") as f:
-        json.dump(daily, f)
-    print(f"  Saved daily_metrics.json")
+    # Process CSV if available
+    if csv_path.exists():
+        df = load_and_clean(csv_path)
 
-    print("Generating anonymized query data...")
-    anon = generate_anonymized_data(df)
-    with open(DATA_DIR / "anonymized.json", "w") as f:
-        json.dump(anon, f)
-    print(f"  Saved anonymized.json")
+        print("\nGenerating datasets from CSV...")
+        new_data = {
+            "overview": generate_overview(df),
+            "daily_metrics": generate_daily_metrics(df),
+            "anonymized": generate_anonymized_data(df),
+            "url_performance": generate_url_performance(df),
+            "keyword_performance": generate_keyword_performance(df),
+            "country_data": generate_country_data(df),
+            "device_search": generate_device_search_data(df),
+            "serp_features": generate_search_features(df),
+            "url_daily": generate_url_daily(df),
+            "keyword_daily": generate_keyword_daily(df),
+        }
 
-    print("Generating URL performance...")
-    urls = generate_url_performance(df)
-    with open(DATA_DIR / "url_performance.json", "w") as f:
-        json.dump(urls, f)
-    print(f"  Saved url_performance.json")
+        # Merge with historical
+        print("\nMerging with historical data...")
+        all_data = merge_with_historical(new_data, historical)
+    elif historical:
+        print(f"\nCSV not found at {csv_path}, using historical data only.")
+        all_data = historical
+    else:
+        print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
+        sys.exit(1)
 
-    print("Generating keyword performance...")
-    keywords = generate_keyword_performance(df)
-    with open(DATA_DIR / "keyword_performance.json", "w") as f:
-        json.dump(keywords, f)
-    print(f"  Saved keyword_performance.json")
+    # Generate standalone HTML
+    print("\nGenerating standalone HTML dashboard...")
+    generate_html(all_data)
 
-    print("Generating country data...")
-    countries = generate_country_data(df)
-    with open(DATA_DIR / "country_data.json", "w") as f:
-        json.dump(countries, f)
-    print(f"  Saved country_data.json")
-
-    print("Generating device & search type data...")
-    device = generate_device_search_data(df)
-    with open(DATA_DIR / "device_search.json", "w") as f:
-        json.dump(device, f)
-    print(f"  Saved device_search.json")
-
-    print("Generating SERP features data...")
-    features = generate_search_features(df)
-    with open(DATA_DIR / "serp_features.json", "w") as f:
-        json.dump(features, f)
-    print(f"  Saved serp_features.json")
-
-    print("Generating URL daily trends...")
-    url_daily = generate_url_daily(df)
-    with open(DATA_DIR / "url_daily.json", "w") as f:
-        json.dump(url_daily, f)
-    print(f"  Saved url_daily.json")
-
-    print("Generating keyword daily trends...")
-    kw_daily = generate_keyword_daily(df)
-    with open(DATA_DIR / "keyword_daily.json", "w") as f:
-        json.dump(kw_daily, f)
-    print(f"  Saved keyword_daily.json")
-
-    print("\nDone! All data files saved to", DATA_DIR)
+    print("\nDone! Open index.html in a browser to view the dashboard.")
 
 
 if __name__ == "__main__":
