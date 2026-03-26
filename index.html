@@ -268,6 +268,18 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
     <div class="filters">
       <div class="filter-group"><label>Market</label><select id="trends-market-filter"><option value="All Markets">All Markets</option></select></div>
     </div>
+    <div class="card" style="background:rgba(99,102,241,0.06);border-color:var(--border);margin-bottom:16px">
+      <h3 style="color:var(--accent2);margin-bottom:8px">About Rolling Averages (Moving Averages)</h3>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:8px">
+        A <strong style="color:var(--text)">rolling average</strong> (also called a moving average) smooths out daily fluctuations to reveal the underlying trend. Instead of looking at each day individually, it takes the average of a set number of consecutive days.
+      </p>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:8px">
+        <strong style="color:#f59e0b">7-day rolling average</strong>: For each day, we calculate the average of that day plus the 6 preceding days (7 days total). This smooths out day-of-week effects (e.g. weekday vs weekend variation) and shows short-term trends. Formula: <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px">MA7(day) = (day + day-1 + day-2 + ... + day-6) / 7</code>
+      </p>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6">
+        <strong style="color:#ef4444">28-day rolling average</strong>: Same concept but averaged over 28 days (4 weeks). This provides a much smoother line that reveals monthly-level trends and filters out weekly noise. Useful for spotting sustained growth or decline. Formula: <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px">MA28(day) = sum of last 28 days / 28</code>
+      </p>
+    </div>
     <div class="grid-2">
       <div class="card"><h3>Impressions &mdash; Daily + Rolling Averages</h3><div class="chart-container tall" id="chart-rolling-imp"></div></div>
       <div class="card"><h3>Clicks &mdash; Daily + Rolling Averages</h3><div class="chart-container tall" id="chart-rolling-clicks"></div></div>
@@ -300,13 +312,25 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
       <div class="filter-group"><label>Market</label><select id="url-market-filter"><option value="All Markets">All Markets</option></select></div>
       <div class="filter-group"><label>Search</label><input type="search" id="url-search" placeholder="Filter URLs..."></div>
       <div class="filter-group"><label>Sort by</label>
-        <select id="url-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
+        <select id="url-sort"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
       </div>
     </div>
+    <div id="url-kpis"></div>
     <div class="card"><h3>Top URLs</h3><div class="table-wrap" id="url-table"></div></div>
     <div class="card"><h3>Daily Trend for Selected URL</h3>
       <select id="url-trend-select" style="margin-bottom: 10px"><option value="">Select a URL to see its trend...</option></select>
-      <div class="chart-container" id="chart-url-trend"></div>
+      <div class="chart-container tall" id="chart-url-trend"></div>
+    </div>
+    <div class="card"><h3>URL Period Comparison</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Compare the selected URL's performance across two date ranges.</p>
+      <div class="filters" style="margin-bottom:12px">
+        <div class="filter-group"><label>Current from</label><input type="date" id="url-comp-a-from"></div>
+        <div class="filter-group"><label>Current to</label><input type="date" id="url-comp-a-to"></div>
+        <div class="filter-group"><label>Previous from</label><input type="date" id="url-comp-b-from"></div>
+        <div class="filter-group"><label>Previous to</label><input type="date" id="url-comp-b-to"></div>
+        <div class="filter-group"><label>&nbsp;</label><button class="btn" onclick="runUrlComparison()">Compare</button></div>
+      </div>
+      <div id="url-comp-results"></div>
     </div>
   </div>
 
@@ -316,13 +340,25 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
       <div class="filter-group"><label>Market</label><select id="kw-market-filter"><option value="All Markets">All Markets</option></select></div>
       <div class="filter-group"><label>Search</label><input type="search" id="kw-search" placeholder="Filter keywords..."></div>
       <div class="filter-group"><label>Sort by</label>
-        <select id="kw-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
+        <select id="kw-sort"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
       </div>
     </div>
+    <div id="kw-kpis"></div>
     <div class="card"><h3>Top Keywords</h3><div class="table-wrap" id="kw-table"></div></div>
     <div class="card"><h3>Daily Trend for Selected Keyword</h3>
       <select id="kw-trend-select" style="margin-bottom: 10px"><option value="">Select a keyword to see its trend...</option></select>
-      <div class="chart-container" id="chart-kw-trend"></div>
+      <div class="chart-container tall" id="chart-kw-trend"></div>
+    </div>
+    <div class="card"><h3>Keyword Period Comparison</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Compare the selected keyword's performance across two date ranges.</p>
+      <div class="filters" style="margin-bottom:12px">
+        <div class="filter-group"><label>Current from</label><input type="date" id="kw-comp-a-from"></div>
+        <div class="filter-group"><label>Current to</label><input type="date" id="kw-comp-a-to"></div>
+        <div class="filter-group"><label>Previous from</label><input type="date" id="kw-comp-b-from"></div>
+        <div class="filter-group"><label>Previous to</label><input type="date" id="kw-comp-b-to"></div>
+        <div class="filter-group"><label>&nbsp;</label><button class="btn" onclick="runKwComparison()">Compare</button></div>
+      </div>
+      <div id="kw-comp-results"></div>
     </div>
   </div>
 
@@ -330,12 +366,20 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
   <div class="tab-content" id="tab-countries">
     <div class="filters">
       <div class="filter-group"><label>Sort by</label>
-        <select id="country-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="anon_pct">Anon %</option></select>
+        <select id="country-sort"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="ctr">CTR</option><option value="anon_pct">Anon %</option></select>
+      </div>
+      <div class="filter-group"><label>Chart Metric</label>
+        <select id="country-chart-metric"><option value="both">Impressions & Clicks</option><option value="clicks">Clicks</option><option value="impressions">Impressions</option></select>
       </div>
     </div>
-    <div class="card"><h3>Visitor Countries - Impressions (Top 30)</h3><div class="chart-container tall" id="chart-country-bar"></div></div>
+    <div class="card"><h3 id="country-bar-title">Visitor Countries (Top 30)</h3><div class="chart-container tall" id="chart-country-bar"></div></div>
     <div class="card"><h3>All Visitor Countries</h3><div class="table-wrap" id="country-table"></div></div>
-    <div class="card"><h3>Daily Impressions by Top Visitor Countries</h3>
+    <div class="card"><h3>Daily Clicks by Top Visitor Countries</h3>
+      <div class="filters" style="margin-bottom:8px">
+        <div class="filter-group"><label>Metric</label>
+          <select id="country-daily-metric"><option value="clicks">Clicks</option><option value="impressions">Impressions</option></select>
+        </div>
+      </div>
       <div class="market-pills" id="country-pills"></div>
       <div class="chart-container tall" id="chart-country-daily"></div>
     </div>
@@ -359,21 +403,29 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
   <div class="tab-content" id="tab-devices">
     <div class="filters">
       <div class="filter-group"><label>Market</label><select id="dev-market-filter"><option value="all">All Markets</option></select></div>
+      <div class="filter-group"><label>Metric</label>
+        <select id="dev-metric-filter"><option value="clicks">Clicks</option><option value="impressions">Impressions</option></select>
+      </div>
     </div>
     <div class="grid-2">
-      <div class="card"><h3>Device Split - Impressions</h3><div class="chart-container" id="chart-device-pie"></div></div>
-      <div class="card"><h3>Search Type Split - Impressions</h3><div class="chart-container" id="chart-search-pie"></div></div>
+      <div class="card"><h3 id="dev-pie-title">Device Split — Clicks</h3><div class="chart-container" id="chart-device-pie"></div></div>
+      <div class="card"><h3 id="search-pie-title">Search Type Split — Clicks</h3><div class="chart-container" id="chart-search-pie"></div></div>
     </div>
     <div class="grid-2">
-      <div class="card"><h3>Daily Impressions by Device</h3><div class="chart-container" id="chart-device-daily"></div></div>
-      <div class="card"><h3>Daily Impressions by Search Type</h3><div class="chart-container" id="chart-search-daily"></div></div>
+      <div class="card"><h3 id="dev-daily-title">Daily Clicks by Device</h3><div class="chart-container" id="chart-device-daily"></div></div>
+      <div class="card"><h3 id="search-daily-title">Daily Clicks by Search Type</h3><div class="chart-container" id="chart-search-daily"></div></div>
     </div>
     <div class="card"><h3>Device Performance by Market</h3><div class="table-wrap" id="device-market-table"></div></div>
   </div>
 
   <!-- SERP FEATURES -->
   <div class="tab-content" id="tab-serp">
-    <div class="card"><h3>SERP Feature Presence (All Markets)</h3><div class="chart-container tall" id="chart-serp-bar"></div></div>
+    <div class="filters">
+      <div class="filter-group"><label>Chart Metric</label>
+        <select id="serp-metric-filter"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="rows">Rows with Feature</option></select>
+      </div>
+    </div>
+    <div class="card"><h3 id="serp-bar-title">SERP Feature — Clicks (All Markets)</h3><div class="chart-container tall" id="chart-serp-bar"></div></div>
     <div class="card"><h3>SERP Features Detail</h3><div class="table-wrap" id="serp-table"></div></div>
     <div class="card"><h3>SERP Features by Market</h3>
       <div class="filters"><div class="filter-group"><label>Market</label><select id="serp-market-filter"></select></div></div>
@@ -621,11 +673,11 @@ function renderOverview() {
   const pm = DATA.overview.per_market;
   const sorted = Object.entries(pm).sort((a,b)=>b[1].impressions-a[1].impressions);
   function mktPeriodSum(market, period, key) { return period.reduce((s,d) => s + (dm[d]?.[market]?.[key]||0), 0); }
-  let html = '<table><thead><tr><th>Market</th><th>Impressions</th><th>7d Change</th><th>Clicks</th><th>7d Change</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th><th>URLs</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Market</th><th>Clicks</th><th>7d Change</th><th>Impressions</th><th>7d Change</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th><th>URLs</th></tr></thead><tbody>';
   sorted.forEach(([m,d]) => {
     const mCurImp = mktPeriodSum(m, last7, 'impressions'), mPrevImp = mktPeriodSum(m, prev7, 'impressions');
     const mCurClk = mktPeriodSum(m, last7, 'clicks'), mPrevClk = mktPeriodSum(m, prev7, 'clicks');
-    html += `<tr><td>${m}</td><td>${fmtN(d.impressions)}</td><td>${deltaSpan(mCurImp,mPrevImp)}</td><td>${fmtN(d.clicks)}</td><td>${deltaSpan(mCurClk,mPrevClk)}</td><td>${d.avg_ctr}%</td><td>${d.avg_position}</td><td>${fmtN(d.unique_keywords)}</td><td>${fmtN(d.unique_urls)}</td></tr>`;
+    html += `<tr><td>${m}</td><td>${fmtN(d.clicks)}</td><td>${deltaSpan(mCurClk,mPrevClk)}</td><td>${fmtN(d.impressions)}</td><td>${deltaSpan(mCurImp,mPrevImp)}</td><td>${d.avg_ctr}%</td><td>${d.avg_position}</td><td>${fmtN(d.unique_keywords)}</td><td>${fmtN(d.unique_urls)}</td></tr>`;
   });
   html += '</tbody></table>';
   document.getElementById('market-summary-table').innerHTML = html;
@@ -708,14 +760,74 @@ function renderUrls() {
   let urls = DATA.url_performance[market] || [];
   if (search) urls = urls.filter(u => u.url.toLowerCase().includes(search) || (u.path||'').toLowerCase().includes(search));
   urls = [...urls].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
-  let html = '<table><thead><tr><th>URL</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th></tr></thead><tbody>';
-  urls.slice(0,100).forEach(u => { html += `<tr><td class="url-cell" title="${u.url}">${u.path||u.url}</td><td>${fmtN(u.impressions)}</td><td>${fmtN(u.clicks)}</td><td>${u.ctr}%</td><td>${u.avg_position}</td></tr>`; });
+
+  // KPI cards
+  const totalClicks = urls.reduce((s,u) => s+u.clicks, 0);
+  const totalImp = urls.reduce((s,u) => s+u.impressions, 0);
+  const avgCtr = totalImp > 0 ? (totalClicks/totalImp*100).toFixed(2) : '0.00';
+  const avgPos = urls.length > 0 ? (urls.reduce((s,u) => s+u.avg_position*u.impressions, 0) / Math.max(1,totalImp)).toFixed(1) : '0.0';
+  document.getElementById('url-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Total Clicks</div><div class="value green">${fmtN(totalClicks)}</div></div>
+      <div class="kpi"><div class="label">Total Impressions</div><div class="value blue">${fmtN(totalImp)}</div></div>
+      <div class="kpi"><div class="label">Avg CTR</div><div class="value orange">${avgCtr}%</div></div>
+      <div class="kpi"><div class="label">Avg Position</div><div class="value purple">${avgPos}</div></div>
+      <div class="kpi"><div class="label">URLs${search ? ' (Filtered)' : ''}</div><div class="value cyan">${urls.length}</div></div>
+    </div>`;
+
+  let html = '<table><thead><tr><th>URL</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th></tr></thead><tbody>';
+  urls.slice(0,100).forEach(u => { html += `<tr><td class="url-cell" title="${u.url}">${u.path||u.url}</td><td>${fmtN(u.clicks)}</td><td>${fmtN(u.impressions)}</td><td>${u.ctr}%</td><td>${u.avg_position}</td></tr>`; });
   html += '</tbody></table>';
   document.getElementById('url-table').innerHTML = html;
   const sel = document.getElementById('url-trend-select');
   const urlDaily = DATA.url_daily;
   sel.innerHTML = '<option value="">Select a URL...</option>';
   Object.keys(urlDaily).slice(0,50).forEach(u => { const o = document.createElement('option'); o.value = u; o.textContent = '/'+u.split('/').slice(3).join('/'); sel.appendChild(o); });
+
+  // Pre-fill comparison dates
+  const dates = DATA.overview.dates;
+  if (dates.length >= 28) {
+    const to = dates[dates.length-1], from = dates[dates.length-28];
+    document.getElementById('url-comp-a-from').value = from;
+    document.getElementById('url-comp-a-to').value = to;
+    const prevTo = parseDate(from); prevTo.setDate(prevTo.getDate()-1);
+    const prevFrom = new Date(prevTo); prevFrom.setDate(prevFrom.getDate()-27);
+    document.getElementById('url-comp-b-from').value = fmtDate(prevFrom);
+    document.getElementById('url-comp-b-to').value = fmtDate(prevTo);
+  }
+}
+function runUrlComparison() {
+  const url = document.getElementById('url-trend-select').value;
+  if (!url) { document.getElementById('url-comp-results').innerHTML = '<p style="color:var(--muted)">Please select a URL above first.</p>'; return; }
+  const daily = DATA.url_daily[url]?.daily || {};
+  const af = document.getElementById('url-comp-a-from').value, at = document.getElementById('url-comp-a-to').value;
+  const bf = document.getElementById('url-comp-b-from').value, bt = document.getElementById('url-comp-b-to').value;
+  if (!af||!at||!bf||!bt) { document.getElementById('url-comp-results').innerHTML = '<p style="color:var(--muted)">Please fill in all date fields.</p>'; return; }
+  const curDates = dateRange(af,at), prevDates = dateRange(bf,bt);
+  function aggUrl(dates) { let imp=0,clk=0; dates.forEach(d => { imp += daily[d]?.impressions||0; clk += daily[d]?.clicks||0; }); return {impressions:imp,clicks:clk,ctr:imp>0?(clk/imp*100).toFixed(2):'0.00'}; }
+  const cur = aggUrl(curDates), prev = aggUrl(prevDates);
+  let h = `<div class="comparison-row" style="margin-top:12px">
+    <div class="comp-card" style="border-left:3px solid var(--accent)"><h4>Current: ${af} to ${at}</h4>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(cur.clicks)} ${deltaSpan(cur.clicks,prev.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(cur.impressions)} ${deltaSpan(cur.impressions,prev.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${cur.ctr}% ${deltaSpan(parseFloat(cur.ctr),parseFloat(prev.ctr))}</span></div>
+    </div><div class="vs-badge">VS</div>
+    <div class="comp-card" style="opacity:0.7"><h4>Previous: ${bf} to ${bt}</h4>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(prev.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(prev.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${prev.ctr}%</span></div>
+    </div></div>`;
+  h += '<div class="grid-2" style="margin-top:12px"><div class="chart-container" id="chart-url-comp-overlay-clicks"></div><div class="chart-container" id="chart-url-comp-overlay-imp"></div></div>';
+  document.getElementById('url-comp-results').innerHTML = h;
+  const dayLabels = curDates.map((_,i) => `Day ${i+1}`);
+  makeChart('chart-url-comp-overlay-clicks', { type:'line', data:{labels:dayLabels,datasets:[
+    {label:'Current Clicks',data:curDates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:2},
+    {label:'Previous Clicks',data:prevDates.map(d=>daily[d]?.clicks||0),borderColor:'#8b8fa3',borderDash:[5,5],tension:0.3,borderWidth:2,pointRadius:2},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  makeChart('chart-url-comp-overlay-imp', { type:'line', data:{labels:dayLabels,datasets:[
+    {label:'Current Impressions',data:curDates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:2},
+    {label:'Previous Impressions',data:prevDates.map(d=>daily[d]?.impressions||0),borderColor:'#8b8fa3',borderDash:[5,5],tension:0.3,borderWidth:2,pointRadius:2},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 }
 document.getElementById('url-market-filter').addEventListener('change', renderUrls);
 document.getElementById('url-search').addEventListener('input', renderUrls);
@@ -723,9 +835,11 @@ document.getElementById('url-sort').addEventListener('change', renderUrls);
 document.getElementById('url-trend-select').addEventListener('change', e => {
   const url = e.target.value; if (!url) return;
   const daily = DATA.url_daily[url]?.daily || {}; const dates = DATA.overview.dates;
+  const impData = dates.map(d=>daily[d]?.impressions||0);
+  const clkData = dates.map(d=>daily[d]?.clicks||0);
   makeChart('chart-url-trend', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
-    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
-    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
+    {label:'Clicks',data:clkData,borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
+    {label:'Impressions',data:impData,borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
   ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
 });
 
@@ -739,14 +853,74 @@ function renderKeywords() {
   let kws = DATA.keyword_performance[market] || [];
   if (search) kws = kws.filter(k => k.query.toLowerCase().includes(search));
   kws = [...kws].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
-  let html = '<table><thead><tr><th>Keyword</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>URLs</th></tr></thead><tbody>';
-  kws.slice(0,100).forEach(k => { html += `<tr><td>${k.query}</td><td>${fmtN(k.impressions)}</td><td>${fmtN(k.clicks)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.url_count}</td></tr>`; });
+
+  // KPI cards
+  const totalClicks = kws.reduce((s,k) => s+k.clicks, 0);
+  const totalImp = kws.reduce((s,k) => s+k.impressions, 0);
+  const avgCtr = totalImp > 0 ? (totalClicks/totalImp*100).toFixed(2) : '0.00';
+  const avgPos = kws.length > 0 ? (kws.reduce((s,k) => s+k.avg_position*k.impressions, 0) / Math.max(1,totalImp)).toFixed(1) : '0.0';
+  document.getElementById('kw-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Total Clicks</div><div class="value green">${fmtN(totalClicks)}</div></div>
+      <div class="kpi"><div class="label">Total Impressions</div><div class="value blue">${fmtN(totalImp)}</div></div>
+      <div class="kpi"><div class="label">Avg CTR</div><div class="value orange">${avgCtr}%</div></div>
+      <div class="kpi"><div class="label">Avg Position</div><div class="value purple">${avgPos}</div></div>
+      <div class="kpi"><div class="label">Keywords${search ? ' (Filtered)' : ''}</div><div class="value cyan">${kws.length}</div></div>
+    </div>`;
+
+  let html = '<table><thead><tr><th>Keyword</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th><th>URLs</th></tr></thead><tbody>';
+  kws.slice(0,100).forEach(k => { html += `<tr><td>${k.query}</td><td>${fmtN(k.clicks)}</td><td>${fmtN(k.impressions)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.url_count}</td></tr>`; });
   html += '</tbody></table>';
   document.getElementById('kw-table').innerHTML = html;
   const sel = document.getElementById('kw-trend-select');
   const kwDaily = DATA.keyword_daily;
   sel.innerHTML = '<option value="">Select a keyword...</option>';
   Object.keys(kwDaily).slice(0,50).forEach(q => { const o = document.createElement('option'); o.value = q; o.textContent = q; sel.appendChild(o); });
+
+  // Pre-fill comparison dates
+  const dates = DATA.overview.dates;
+  if (dates.length >= 28) {
+    const to = dates[dates.length-1], from = dates[dates.length-28];
+    document.getElementById('kw-comp-a-from').value = from;
+    document.getElementById('kw-comp-a-to').value = to;
+    const prevTo = parseDate(from); prevTo.setDate(prevTo.getDate()-1);
+    const prevFrom = new Date(prevTo); prevFrom.setDate(prevFrom.getDate()-27);
+    document.getElementById('kw-comp-b-from').value = fmtDate(prevFrom);
+    document.getElementById('kw-comp-b-to').value = fmtDate(prevTo);
+  }
+}
+function runKwComparison() {
+  const q = document.getElementById('kw-trend-select').value;
+  if (!q) { document.getElementById('kw-comp-results').innerHTML = '<p style="color:var(--muted)">Please select a keyword above first.</p>'; return; }
+  const daily = DATA.keyword_daily[q] || {};
+  const af = document.getElementById('kw-comp-a-from').value, at = document.getElementById('kw-comp-a-to').value;
+  const bf = document.getElementById('kw-comp-b-from').value, bt = document.getElementById('kw-comp-b-to').value;
+  if (!af||!at||!bf||!bt) { document.getElementById('kw-comp-results').innerHTML = '<p style="color:var(--muted)">Please fill in all date fields.</p>'; return; }
+  const curDates = dateRange(af,at), prevDates = dateRange(bf,bt);
+  function aggKw(dates) { let imp=0,clk=0; dates.forEach(d => { imp += daily[d]?.impressions||0; clk += daily[d]?.clicks||0; }); return {impressions:imp,clicks:clk,ctr:imp>0?(clk/imp*100).toFixed(2):'0.00'}; }
+  const cur = aggKw(curDates), prev = aggKw(prevDates);
+  let h = `<div class="comparison-row" style="margin-top:12px">
+    <div class="comp-card" style="border-left:3px solid var(--accent)"><h4>Current: ${af} to ${at}</h4>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(cur.clicks)} ${deltaSpan(cur.clicks,prev.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(cur.impressions)} ${deltaSpan(cur.impressions,prev.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${cur.ctr}% ${deltaSpan(parseFloat(cur.ctr),parseFloat(prev.ctr))}</span></div>
+    </div><div class="vs-badge">VS</div>
+    <div class="comp-card" style="opacity:0.7"><h4>Previous: ${bf} to ${bt}</h4>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(prev.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(prev.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${prev.ctr}%</span></div>
+    </div></div>`;
+  h += '<div class="grid-2" style="margin-top:12px"><div class="chart-container" id="chart-kw-comp-overlay-clicks"></div><div class="chart-container" id="chart-kw-comp-overlay-imp"></div></div>';
+  document.getElementById('kw-comp-results').innerHTML = h;
+  const dayLabels = curDates.map((_,i) => `Day ${i+1}`);
+  makeChart('chart-kw-comp-overlay-clicks', { type:'line', data:{labels:dayLabels,datasets:[
+    {label:'Current Clicks',data:curDates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:2},
+    {label:'Previous Clicks',data:prevDates.map(d=>daily[d]?.clicks||0),borderColor:'#8b8fa3',borderDash:[5,5],tension:0.3,borderWidth:2,pointRadius:2},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  makeChart('chart-kw-comp-overlay-imp', { type:'line', data:{labels:dayLabels,datasets:[
+    {label:'Current Impressions',data:curDates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:2},
+    {label:'Previous Impressions',data:prevDates.map(d=>daily[d]?.impressions||0),borderColor:'#8b8fa3',borderDash:[5,5],tension:0.3,borderWidth:2,pointRadius:2},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 }
 document.getElementById('kw-market-filter').addEventListener('change', renderKeywords);
 document.getElementById('kw-search').addEventListener('input', renderKeywords);
@@ -754,9 +928,11 @@ document.getElementById('kw-sort').addEventListener('change', renderKeywords);
 document.getElementById('kw-trend-select').addEventListener('change', e => {
   const q = e.target.value; if (!q) return;
   const daily = DATA.keyword_daily[q] || {}; const dates = DATA.overview.dates;
+  const clkData = dates.map(d=>daily[d]?.clicks||0);
+  const impData = dates.map(d=>daily[d]?.impressions||0);
   makeChart('chart-kw-trend', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
-    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
-    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
+    {label:'Clicks',data:clkData,borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
+    {label:'Impressions',data:impData,borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
   ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
 });
 
@@ -765,13 +941,27 @@ document.getElementById('kw-trend-select').addEventListener('change', e => {
 // ═══════════════════════════════════════════
 function renderCountries() {
   const sortBy = document.getElementById('country-sort').value;
+  const chartMetric = document.getElementById('country-chart-metric').value;
   let countries = DATA.country_data.summary;
   countries = [...countries].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
   const top30 = countries.slice(0,30);
-  makeChart('chart-country-bar', { type:'bar', data:{labels:top30.map(c=>c.country),datasets:[{label:'Impressions',data:top30.map(c=>c.impressions),backgroundColor:COLORS.concat(COLORS)}]},
-    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
-  let html = '<table><thead><tr><th>Country</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>Anon %</th><th>Rows</th></tr></thead><tbody>';
-  countries.forEach(c => { html += `<tr><td>${c.country}</td><td>${fmtN(c.impressions)}</td><td>${fmtN(c.clicks)}</td><td>${c.ctr}%</td><td>${c.avg_position}</td><td><span class="badge ${c.anon_pct>25?'badge-orange':'badge-blue'}">${c.anon_pct}%</span></td><td>${fmtN(c.total_rows)}</td></tr>`; });
+
+  // Bar chart respects chart metric selection
+  const barDatasets = [];
+  if (chartMetric === 'both') {
+    barDatasets.push({label:'Clicks',data:top30.map(c=>c.clicks),backgroundColor:'#22c55e80',borderColor:'#22c55e',borderWidth:1});
+    barDatasets.push({label:'Impressions',data:top30.map(c=>c.impressions),backgroundColor:'#6366f140',borderColor:'#6366f1',borderWidth:1});
+    document.getElementById('country-bar-title').textContent = 'Visitor Countries — Impressions & Clicks (Top 30)';
+  } else {
+    const label = chartMetric === 'clicks' ? 'Clicks' : 'Impressions';
+    barDatasets.push({label,data:top30.map(c=>c[chartMetric]),backgroundColor:COLORS.concat(COLORS)});
+    document.getElementById('country-bar-title').textContent = `Visitor Countries — ${label} (Top 30)`;
+  }
+  makeChart('chart-country-bar', { type:'bar', data:{labels:top30.map(c=>c.country),datasets:barDatasets},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:chartMetric==='both',position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+
+  let html = '<table><thead><tr><th>Country</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th><th>Anon %</th><th>Rows</th></tr></thead><tbody>';
+  countries.forEach(c => { html += `<tr><td>${c.country}</td><td>${fmtN(c.clicks)}</td><td>${fmtN(c.impressions)}</td><td>${c.ctr}%</td><td>${c.avg_position}</td><td><span class="badge ${c.anon_pct>25?'badge-orange':'badge-blue'}">${c.anon_pct}%</span></td><td>${fmtN(c.total_rows)}</td></tr>`; });
   html += '</tbody></table>';
   document.getElementById('country-table').innerHTML = html;
   const pillContainer = document.getElementById('country-pills');
@@ -783,11 +973,14 @@ function renderCountries() {
 }
 function renderCountryDaily() {
   const active = [...document.querySelectorAll('#country-pills .pill.active')].map(p=>p.textContent);
+  const metric = document.getElementById('country-daily-metric').value;
   const dates = DATA.overview.dates; const daily = DATA.country_data.daily;
-  const datasets = active.map((c,i) => ({ label: c, data: dates.map(d => daily[d]?.[c]?.impressions || 0), borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2, }));
+  const datasets = active.map((c,i) => ({ label: c, data: dates.map(d => daily[d]?.[c]?.[metric] || 0), borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2, }));
   makeChart('chart-country-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 }
 document.getElementById('country-sort').addEventListener('change', renderCountries);
+document.getElementById('country-chart-metric').addEventListener('change', renderCountries);
+document.getElementById('country-daily-metric').addEventListener('change', renderCountryDaily);
 
 // ═══════════════════════════════════════════
 // TAB: DOMAIN COMPARISON
@@ -831,32 +1024,42 @@ document.getElementById('domain-b').addEventListener('change', renderDomains);
 // ═══════════════════════════════════════════
 function renderDevices() {
   const market = document.getElementById('dev-market-filter').value;
+  const metric = document.getElementById('dev-metric-filter').value;
+  const metricLabel = metric === 'clicks' ? 'Clicks' : 'Impressions';
   const ds = DATA.device_search; const dates = DATA.overview.dates;
+
+  // Update titles
+  document.getElementById('dev-pie-title').textContent = `Device Split — ${metricLabel}`;
+  document.getElementById('search-pie-title').textContent = `Search Type Split — ${metricLabel}`;
+  document.getElementById('dev-daily-title').textContent = `Daily ${metricLabel} by Device`;
+  document.getElementById('search-daily-title').textContent = `Daily ${metricLabel} by Search Type`;
+
   let deviceData;
   if (market === 'all') { deviceData = {}; Object.values(ds.by_market_device).forEach(md => { Object.entries(md).forEach(([dev,d]) => { if(!deviceData[dev]) deviceData[dev]={impressions:0,clicks:0}; deviceData[dev].impressions += d.impressions; deviceData[dev].clicks += d.clicks; }); }); }
   else { deviceData = ds.by_market_device[market] || {}; }
   const devLabels = Object.keys(deviceData);
-  makeChart('chart-device-pie', { type:'doughnut', data:{labels:devLabels,datasets:[{data:devLabels.map(d=>deviceData[d].impressions),backgroundColor:['#6366f1','#22c55e','#f59e0b']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
+  makeChart('chart-device-pie', { type:'doughnut', data:{labels:devLabels,datasets:[{data:devLabels.map(d=>deviceData[d][metric]),backgroundColor:['#6366f1','#22c55e','#f59e0b']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
 
   let searchData;
   if (market === 'all') { searchData = {}; Object.values(ds.by_market_search).forEach(ms => { Object.entries(ms).forEach(([st,d]) => { if(!searchData[st]) searchData[st]={impressions:0,clicks:0}; searchData[st].impressions += d.impressions; searchData[st].clicks += d.clicks; }); }); }
   else { searchData = ds.by_market_search[market] || {}; }
   const stLabels = Object.keys(searchData);
-  makeChart('chart-search-pie', { type:'doughnut', data:{labels:stLabels,datasets:[{data:stLabels.map(s=>searchData[s].impressions),backgroundColor:['#3b82f6','#ec4899','#06b6d4']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
+  makeChart('chart-search-pie', { type:'doughnut', data:{labels:stLabels,datasets:[{data:stLabels.map(s=>searchData[s][metric]),backgroundColor:['#3b82f6','#ec4899','#06b6d4']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
 
   const dailyDev = ds.daily_device; const devices = ['DESKTOP','MOBILE','TABLET'];
-  makeChart('chart-device-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({ label:dev, data:dates.map(d=>dailyDev[d]?.[dev]?.impressions||0), borderColor:['#6366f1','#22c55e','#f59e0b'][i], tension:0.3, borderWidth:2, pointRadius:2, }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  makeChart('chart-device-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({ label:dev, data:dates.map(d=>dailyDev[d]?.[dev]?.[metric]||0), borderColor:['#6366f1','#22c55e','#f59e0b'][i], tension:0.3, borderWidth:2, pointRadius:2, }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 
   const dailySt = ds.daily_search; const stypes = ['WEB','IMAGE','VIDEO'];
-  makeChart('chart-search-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({ label:st, data:dates.map(d=>dailySt[d]?.[st]?.impressions||0), borderColor:['#3b82f6','#ec4899','#06b6d4'][i], tension:0.3, borderWidth:2, pointRadius:2, }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  makeChart('chart-search-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({ label:st, data:dates.map(d=>dailySt[d]?.[st]?.[metric]||0), borderColor:['#3b82f6','#ec4899','#06b6d4'][i], tension:0.3, borderWidth:2, pointRadius:2, }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 
   const allMarkets = Object.keys(ds.by_market_device).sort();
-  let html = '<table><thead><tr><th>Market</th><th>Desktop Imp</th><th>Desktop CTR</th><th>Mobile Imp</th><th>Mobile CTR</th><th>Tablet Imp</th><th>Tablet CTR</th></tr></thead><tbody>';
-  allMarkets.forEach(m => { const md = ds.by_market_device[m]; html += `<tr><td>${m}</td>`; devices.forEach(dev => { const d = md[dev] || {impressions:0,ctr:0}; html += `<td>${fmtN(d.impressions)}</td><td>${d.ctr||0}%</td>`; }); html += '</tr>'; });
+  let html = '<table><thead><tr><th>Market</th><th>Desktop Clicks</th><th>Desktop Imp</th><th>Desktop CTR</th><th>Mobile Clicks</th><th>Mobile Imp</th><th>Mobile CTR</th><th>Tablet Clicks</th><th>Tablet Imp</th><th>Tablet CTR</th></tr></thead><tbody>';
+  allMarkets.forEach(m => { const md = ds.by_market_device[m]; html += `<tr><td>${m}</td>`; devices.forEach(dev => { const d = md[dev] || {impressions:0,clicks:0,ctr:0}; html += `<td>${fmtN(d.clicks||0)}</td><td>${fmtN(d.impressions)}</td><td>${d.ctr||0}%</td>`; }); html += '</tr>'; });
   html += '</tbody></table>';
   document.getElementById('device-market-table').innerHTML = html;
 }
 document.getElementById('dev-market-filter').addEventListener('change', renderDevices);
+document.getElementById('dev-metric-filter').addEventListener('change', renderDevices);
 
 // ═══════════════════════════════════════════
 // TAB: DATE COMPARISON (ENHANCED)
@@ -1093,23 +1296,32 @@ function runComparison() {
 // ═══════════════════════════════════════════
 function renderSerpFeatures() {
   const sf = DATA.serp_features;
-  const features = Object.entries(sf.summary).sort((a,b) => b[1].rows - a[1].rows);
+  const serpMetric = document.getElementById('serp-metric-filter').value;
+  const metricLabels = {clicks:'Clicks',impressions:'Impressions',rows:'Rows with Feature'};
+  const features = Object.entries(sf.summary).sort((a,b) => b[1][serpMetric] - a[1][serpMetric]);
+  document.getElementById('serp-bar-title').textContent = `SERP Feature — ${metricLabels[serpMetric]} (All Markets)`;
   makeChart('chart-serp-bar', { type:'bar', data:{labels:features.map(f=>f[0]),datasets:[
-    {label:'Rows with Feature',data:features.map(f=>f[1].rows),backgroundColor:'#6366f180',borderColor:'#6366f1',borderWidth:1},
+    {label:metricLabels[serpMetric],data:features.map(f=>f[1][serpMetric]),backgroundColor:serpMetric==='clicks'?'#22c55e80':serpMetric==='impressions'?'#6366f180':'#f59e0b80',borderColor:serpMetric==='clicks'?'#22c55e':serpMetric==='impressions'?'#6366f1':'#f59e0b',borderWidth:1},
   ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
-  let html = '<table><thead><tr><th>Feature</th><th>Rows</th><th>Impressions</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>';
-  features.forEach(([name,d]) => { html += `<tr><td>${name}</td><td>${fmtN(d.rows)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td><td>${d.ctr}%</td></tr>`; });
+  let html = '<table><thead><tr><th>Feature</th><th>Clicks</th><th>Impressions</th><th>Rows</th><th>CTR</th></tr></thead><tbody>';
+  features.forEach(([name,d]) => { html += `<tr><td>${name}</td><td>${fmtN(d.clicks)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.rows)}</td><td>${d.ctr}%</td></tr>`; });
   html += '</tbody></table>';
   document.getElementById('serp-table').innerHTML = html;
-  document.getElementById('serp-market-filter').addEventListener('change', e => {
-    const m = e.target.value; const mf = sf.by_market[m] || {};
-    const sorted = Object.entries(mf).sort((a,b) => b[1].rows - a[1].rows);
-    let h = '<table><thead><tr><th>Feature</th><th>Rows</th><th>Impressions</th><th>Clicks</th></tr></thead><tbody>';
-    sorted.forEach(([name,d]) => { h += `<tr><td>${name}</td><td>${fmtN(d.rows)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td></tr>`; });
-    h += '</tbody></table>';
-    document.getElementById('serp-market-table').innerHTML = h;
-  });
+  renderSerpMarketTable();
 }
+function renderSerpMarketTable() {
+  const sf = DATA.serp_features;
+  const m = document.getElementById('serp-market-filter').value;
+  if (!m) return;
+  const mf = sf.by_market[m] || {};
+  const sorted = Object.entries(mf).sort((a,b) => b[1].clicks - a[1].clicks);
+  let h = '<table><thead><tr><th>Feature</th><th>Clicks</th><th>Impressions</th><th>Rows</th></tr></thead><tbody>';
+  sorted.forEach(([name,d]) => { h += `<tr><td>${name}</td><td>${fmtN(d.clicks)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.rows)}</td></tr>`; });
+  h += '</tbody></table>';
+  document.getElementById('serp-market-table').innerHTML = h;
+}
+document.getElementById('serp-metric-filter').addEventListener('change', renderSerpFeatures);
+document.getElementById('serp-market-filter').addEventListener('change', renderSerpMarketTable);
 
 // ═══════════════════════════════════════════
 // TAB: YOY ANALYSIS (NEW)
