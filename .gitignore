@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Google Cloud service account credentials - NEVER commit these
+*service-account*.json
+*-credentials.json
+obsidian-*.json
+gcp-key*.json
+.env
+.env.*

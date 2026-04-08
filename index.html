@@ -194,6 +194,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
   <div class="tab" data-tab="domains">Domain Comparison</div>
   <div class="tab" data-tab="devices">Device & Search Type</div>
   <div class="tab" data-tab="serp">SERP Features</div>
+  <div class="tab" data-tab="ga4">Google Analytics</div>
 </div>
 
 <div class="content">
@@ -432,6 +433,94 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
       <div class="table-wrap" id="serp-market-table"></div>
     </div>
   </div>
+
+  <!-- GOOGLE ANALYTICS 4 -->
+  <div class="tab-content" id="tab-ga4">
+    <div id="ga4-missing" class="card" style="display:none;background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.3)">
+      <h3 style="color:#fca5a5">Google Analytics data not available</h3>
+      <p style="color:var(--muted);font-size:13px;line-height:1.6">
+        No GA4 data found. To enable this tab:<br>
+        1. Place the service account JSON file (e.g. <code>obsidian-xxxxxx.json</code>) one directory above the project folder<br>
+        2. Install the BigQuery client: <code>pip install google-cloud-bigquery</code><br>
+        3. Run <code>python preprocess.py</code><br>
+        Data is pulled from <code>obsidian-375910.woodupp.ga4</code>, filtered to Organic Search only, last 2 years.
+      </p>
+    </div>
+    <div id="ga4-content" style="display:none">
+      <div class="card" style="background:rgba(99,102,241,0.06);border-color:rgba(99,102,241,0.25)">
+        <h3>About this tab</h3>
+        <p style="color:var(--muted);font-size:13px;line-height:1.6;margin:0">
+          Google Analytics 4 data for <strong>Organic Search only</strong> (filtered to match GSC behaviour). Pulled daily from BigQuery table <code>obsidian-375910.woodupp.ga4</code> for the last 2 years.
+          Sessions, users, and conversions are summed; <strong>revenue is shown per market in local currency</strong> and never aggregated across markets to avoid misleading mixed-currency totals.
+        </p>
+      </div>
+
+      <div id="ga4-kpis"></div>
+
+      <div class="filters" style="flex-wrap:wrap">
+        <div class="filter-group"><label>Market</label><select id="ga4-market-filter"><option value="All Markets">All Markets</option></select></div>
+        <div class="filter-group"><label>Metric</label>
+          <select id="ga4-metric-filter">
+            <option value="sessions" selected>Sessions</option>
+            <option value="users">Users</option>
+            <option value="conversions">Conversions</option>
+            <option value="revenue">Revenue (per-market only)</option>
+          </select>
+        </div>
+        <div class="filter-group"><label>Rolling avg</label>
+          <select id="ga4-rolling">
+            <option value="0">None</option>
+            <option value="7" selected>7-day</option>
+            <option value="28">28-day</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 id="ga4-daily-title">Daily Sessions — All Markets</h3>
+        <div class="chart-container tall" id="chart-ga4-daily"></div>
+      </div>
+
+      <div class="card">
+        <h3>Period comparison</h3>
+        <div class="filters" style="flex-wrap:wrap">
+          <div class="filter-group"><label>Preset</label>
+            <select id="ga4-comp-preset">
+              <optgroup label="Sequential (vs previous period)">
+                <option value="last7">Last 7 days vs Previous 7</option>
+                <option value="last28" selected>Last 28 days vs Previous 28</option>
+                <option value="last90">Last 90 days vs Previous 90</option>
+                <option value="monthPrev">Last full month vs Previous month</option>
+              </optgroup>
+              <optgroup label="Year-over-Year">
+                <option value="last28yoy">Last 28 days — YoY</option>
+                <option value="last90yoy">Last 90 days — YoY</option>
+                <option value="monthYoY">Last full month — YoY</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="filter-group"><label>&nbsp;</label><button class="btn" onclick="runGa4Comparison()">Compare</button></div>
+        </div>
+        <div id="ga4-comp-results"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3 id="ga4-bar-title">Sessions by Market</h3>
+          <div class="chart-container tall" id="chart-ga4-market-bar"></div>
+        </div>
+        <div class="card">
+          <h3>Conversion Rate by Market</h3>
+          <div class="chart-container tall" id="chart-ga4-cvr"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Market summary</h3>
+        <div class="table-wrap" id="ga4-market-table"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -487,6 +576,10 @@ async function loadAll() {
     DATA.historical = hist;
     console.log('Historical data loaded:', hist.metadata?.detailed_data_start);
   } catch(e) { DATA.historical = null; console.log('No historical data found (optional)'); }
+  try {
+    DATA.ga4 = await fetch('data/ga4.json').then(r => r.json());
+    console.log('GA4 data loaded:', DATA.ga4.has_data ? (DATA.ga4.dates?.length + ' days') : 'empty');
+  } catch(e) { DATA.ga4 = { has_data: false }; console.log('No GA4 data found (optional)'); }
   initApp();
 }
 
@@ -585,6 +678,7 @@ function initApp() {
   setupComparison();
   renderYoY();
   renderTrends();
+  renderGa4();
 }
 
 function populateFilters() {
@@ -673,13 +767,31 @@ function renderOverview() {
   const pm = DATA.overview.per_market;
   const sorted = Object.entries(pm).sort((a,b)=>b[1].impressions-a[1].impressions);
   function mktPeriodSum(market, period, key) { return period.reduce((s,d) => s + (dm[d]?.[market]?.[key]||0), 0); }
-  let html = '<table><thead><tr><th>Market</th><th>Clicks</th><th>7d Change</th><th>Impressions</th><th>7d Change</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th><th>URLs</th></tr></thead><tbody>';
+  const hasGa4 = ga4HasData();
+  const ga4Totals = hasGa4 ? DATA.ga4.totals_per_market : {};
+  let html = '<table><thead><tr><th>Market</th><th>Clicks</th><th>7d Change</th><th>Impressions</th><th>7d Change</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th><th>URLs</th>'
+    + (hasGa4 ? '<th title="Google Analytics organic sessions (all-time in GA4 window)">GA Sessions</th><th title="Google Analytics organic conversions">GA Conversions</th><th title="GA conversion rate (conversions / sessions)">GA CvR</th><th title="GA revenue in local currency">GA Revenue</th>' : '')
+    + '</tr></thead><tbody>';
   sorted.forEach(([m,d]) => {
     const mCurImp = mktPeriodSum(m, last7, 'impressions'), mPrevImp = mktPeriodSum(m, prev7, 'impressions');
     const mCurClk = mktPeriodSum(m, last7, 'clicks'), mPrevClk = mktPeriodSum(m, prev7, 'clicks');
-    html += `<tr><td>${m}</td><td>${fmtN(d.clicks)}</td><td>${deltaSpan(mCurClk,mPrevClk)}</td><td>${fmtN(d.impressions)}</td><td>${deltaSpan(mCurImp,mPrevImp)}</td><td>${d.avg_ctr}%</td><td>${d.avg_position}</td><td>${fmtN(d.unique_keywords)}</td><td>${fmtN(d.unique_urls)}</td></tr>`;
+    let gaCols = '';
+    if (hasGa4) {
+      const g = ga4Totals[m];
+      if (g) {
+        const cvr = g.sessions > 0 ? (g.conversions/g.sessions*100).toFixed(2)+'%' : '—';
+        const rev = g.revenue > 0 ? fmtN(Math.round(g.revenue)) + (g.currency ? ' '+g.currency : '') : '—';
+        gaCols = `<td>${fmtN(g.sessions)}</td><td>${fmtN(g.conversions)}</td><td>${cvr}</td><td>${rev}</td>`;
+      } else {
+        gaCols = '<td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td><td style="color:var(--muted)">—</td>';
+      }
+    }
+    html += `<tr><td>${m}</td><td>${fmtN(d.clicks)}</td><td>${deltaSpan(mCurClk,mPrevClk)}</td><td>${fmtN(d.impressions)}</td><td>${deltaSpan(mCurImp,mPrevImp)}</td><td>${d.avg_ctr}%</td><td>${d.avg_position}</td><td>${fmtN(d.unique_keywords)}</td><td>${fmtN(d.unique_urls)}</td>${gaCols}</tr>`;
   });
   html += '</tbody></table>';
+  if (hasGa4) {
+    html += '<div style="margin-top:8px;font-size:11px;color:var(--muted)">GA columns sourced from BigQuery (organic search only, full GA4 window). Revenue shown per market in local currency.</div>';
+  }
   document.getElementById('market-summary-table').innerHTML = html;
 
   const pieLabels = sorted.map(s=>s[0]);
@@ -1544,6 +1656,280 @@ function renderTrends(market) {
   document.getElementById('trends-monthly-summary').innerHTML = mhtml;
 }
 document.getElementById('trends-market-filter').addEventListener('change', e => renderTrends(e.target.value));
+
+// ═══════════════════════════════════════════
+// TAB: GOOGLE ANALYTICS 4
+// ═══════════════════════════════════════════
+function ga4HasData() { return DATA.ga4 && DATA.ga4.has_data && DATA.ga4.dates && DATA.ga4.dates.length > 0; }
+
+function fmtMoney(n, currency) {
+  if (!currency) return fmtN(Math.round(n));
+  try { return Math.round(n).toLocaleString() + ' ' + currency; } catch(e) { return n + ' ' + currency; }
+}
+
+function ga4GetValue(date, market, metric) {
+  const day = DATA.ga4.daily[date];
+  if (!day) return 0;
+  const entry = day[market];
+  if (!entry) return 0;
+  return entry[metric] || 0;
+}
+
+function ga4SumPeriod(dates, market, metric) {
+  return dates.reduce((s, d) => s + ga4GetValue(d, market, metric), 0);
+}
+
+function renderGa4() {
+  if (!ga4HasData()) {
+    document.getElementById('ga4-missing').style.display = 'block';
+    document.getElementById('ga4-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('ga4-missing').style.display = 'none';
+  document.getElementById('ga4-content').style.display = 'block';
+
+  // Populate market dropdown
+  const mSel = document.getElementById('ga4-market-filter');
+  mSel.innerHTML = '<option value="All Markets">All Markets</option>';
+  DATA.ga4.markets.forEach(m => {
+    const o = document.createElement('option'); o.value = m; o.textContent = m; mSel.appendChild(o);
+  });
+
+  renderGa4Kpis();
+  renderGa4DailyChart();
+  renderGa4MarketCharts();
+  renderGa4MarketTable();
+  runGa4Comparison();
+}
+
+function renderGa4Kpis() {
+  const dates = DATA.ga4.dates;
+  const last28 = dates.slice(-28);
+  const prev28 = dates.slice(-56, -28);
+  const t = DATA.ga4.totals_all;
+
+  const curSess = ga4SumPeriod(last28, 'All Markets', 'sessions');
+  const prevSess = ga4SumPeriod(prev28, 'All Markets', 'sessions');
+  const curUsers = ga4SumPeriod(last28, 'All Markets', 'users');
+  const prevUsers = ga4SumPeriod(prev28, 'All Markets', 'users');
+  const curConv = ga4SumPeriod(last28, 'All Markets', 'conversions');
+  const prevConv = ga4SumPeriod(prev28, 'All Markets', 'conversions');
+  const curCvr = curSess > 0 ? curConv/curSess*100 : 0;
+  const prevCvr = prevSess > 0 ? prevConv/prevSess*100 : 0;
+
+  document.getElementById('ga4-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Total Sessions</div><div class="value blue">${fmtN(t.sessions)}</div><div style="margin-top:4px;font-size:12px;color:var(--muted)">Last 28d: ${deltaSpan(curSess,prevSess)}</div></div>
+      <div class="kpi"><div class="label">Total Users</div><div class="value cyan">${fmtN(t.users)}</div><div style="margin-top:4px;font-size:12px;color:var(--muted)">Last 28d: ${deltaSpan(curUsers,prevUsers)}</div></div>
+      <div class="kpi"><div class="label">Total Conversions</div><div class="value green">${fmtN(t.conversions)}</div><div style="margin-top:4px;font-size:12px;color:var(--muted)">Last 28d: ${deltaSpan(curConv,prevConv)}</div></div>
+      <div class="kpi"><div class="label">Avg Conversion Rate</div><div class="value orange">${curCvr.toFixed(2)}%</div><div style="margin-top:4px;font-size:12px;color:var(--muted)">Last 28d: ${deltaSpan(curCvr,prevCvr)}</div></div>
+      <div class="kpi"><div class="label">Markets (GA4)</div><div class="value purple">${DATA.ga4.markets.length}</div></div>
+      <div class="kpi"><div class="label">Date range</div><div class="value" style="font-size:14px">${DATA.ga4.date_range.start}<br><span style="color:var(--muted);font-size:12px">to ${DATA.ga4.date_range.end}</span></div></div>
+    </div>`;
+}
+
+function renderGa4DailyChart() {
+  const market = document.getElementById('ga4-market-filter').value;
+  const metric = document.getElementById('ga4-metric-filter').value;
+  const rolling = parseInt(document.getElementById('ga4-rolling').value);
+  const dates = DATA.ga4.dates;
+
+  // Revenue is per-market only. If "All Markets" + revenue, show a helpful message and pick the top market instead.
+  let effectiveMarket = market;
+  let note = '';
+  if (metric === 'revenue' && market === 'All Markets') {
+    // Pick the market with highest revenue to show something meaningful
+    const byRev = Object.entries(DATA.ga4.totals_per_market).sort((a,b) => b[1].revenue - a[1].revenue);
+    effectiveMarket = byRev[0][0];
+    note = ` (showing ${effectiveMarket} — revenue not aggregated across markets due to mixed currencies)`;
+  }
+
+  const currency = metric === 'revenue' ? (DATA.ga4.currencies[effectiveMarket] || '') : '';
+  const label = metric.charAt(0).toUpperCase() + metric.slice(1);
+  document.getElementById('ga4-daily-title').textContent =
+    `Daily ${label} — ${effectiveMarket}${currency ? ' ('+currency+')' : ''}${note}`;
+
+  const rawData = dates.map(d => ga4GetValue(d, effectiveMarket, metric));
+  const datasets = [{
+    label: label,
+    data: rawData,
+    borderColor: '#6366f1',
+    backgroundColor: '#6366f120',
+    fill: true,
+    tension: 0.3,
+    borderWidth: 2,
+    pointRadius: dates.length > 60 ? 0 : 2,
+  }];
+  if (rolling > 0) {
+    datasets.push({
+      label: `${rolling}-day avg`,
+      data: rollingAvg(rawData, rolling),
+      borderColor: '#f59e0b',
+      backgroundColor: 'transparent',
+      fill: false,
+      tension: 0.3,
+      borderWidth: 2,
+      pointRadius: 0,
+      borderDash: [4, 4],
+    });
+  }
+  makeChart('chart-ga4-daily', {
+    type: 'line',
+    data: { labels: dates.map(d => d.slice(5)), datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b8fa3', font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: '#8b8fa3', maxTicksLimit: 20 }, grid: { color: '#2a2d3a' } },
+        y: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2a2d3a' } }
+      }
+    }
+  });
+}
+
+function renderGa4MarketCharts() {
+  const metric = document.getElementById('ga4-metric-filter').value;
+
+  // Sessions (or selected metric) by market bar chart
+  const totals = DATA.ga4.totals_per_market;
+  const entries = Object.entries(totals);
+  const barMetric = (metric === 'revenue') ? 'sessions' : metric;  // revenue per market shown separately
+  entries.sort((a,b) => (b[1][barMetric]||0) - (a[1][barMetric]||0));
+
+  const label = barMetric.charAt(0).toUpperCase() + barMetric.slice(1);
+  document.getElementById('ga4-bar-title').textContent = `${label} by Market`;
+  makeChart('chart-ga4-market-bar', {
+    type: 'bar',
+    data: {
+      labels: entries.map(e => e[0]),
+      datasets: [{ label: label, data: entries.map(e => e[1][barMetric]||0), backgroundColor: COLORS }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2a2d3a' } },
+        y: { ticks: { color: '#8b8fa3', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  // Conversion rate by market
+  const cvrEntries = Object.entries(totals).map(([m, d]) => [m, d.sessions > 0 ? d.conversions/d.sessions*100 : 0]);
+  cvrEntries.sort((a,b) => b[1] - a[1]);
+  makeChart('chart-ga4-cvr', {
+    type: 'bar',
+    data: {
+      labels: cvrEntries.map(e => e[0]),
+      datasets: [{ label: 'Conv. rate %', data: cvrEntries.map(e => +e[1].toFixed(2)), backgroundColor: '#22c55e' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b8fa3', callback: v => v+'%' }, grid: { color: '#2a2d3a' } },
+        y: { ticks: { color: '#8b8fa3', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function renderGa4MarketTable() {
+  const totals = DATA.ga4.totals_per_market;
+  const entries = Object.entries(totals).sort((a,b) => b[1].sessions - a[1].sessions);
+  let html = '<table><thead><tr><th>Market</th><th>Sessions</th><th>Users</th><th>Conversions</th><th>Conv. Rate</th><th>Revenue</th><th>Currency</th></tr></thead><tbody>';
+  entries.forEach(([m, d]) => {
+    const cvr = d.sessions > 0 ? (d.conversions/d.sessions*100).toFixed(2) : '0.00';
+    html += `<tr><td>${m}</td><td>${fmtN(d.sessions)}</td><td>${fmtN(d.users)}</td><td>${fmtN(d.conversions)}</td><td>${cvr}%</td><td>${fmtN(Math.round(d.revenue))}</td><td style="color:var(--muted)">${d.currency||'—'}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('ga4-market-table').innerHTML = html;
+}
+
+function runGa4Comparison() {
+  if (!ga4HasData()) return;
+  const preset = document.getElementById('ga4-comp-preset').value;
+  const market = document.getElementById('ga4-market-filter').value;
+  const dates = DATA.ga4.dates;
+  const lastDate = dates[dates.length-1];
+
+  function rangeOffset(days, offset) {
+    const end = dates.length - 1 - offset;
+    const start = end - days + 1;
+    if (start < 0) return [];
+    return dates.slice(start, end + 1);
+  }
+  function yoyRange(days) {
+    const end = parseDate(lastDate);
+    const start = new Date(end); start.setDate(start.getDate() - days + 1);
+    const yEnd = new Date(end); yEnd.setFullYear(yEnd.getFullYear()-1);
+    const yStart = new Date(start); yStart.setFullYear(yStart.getFullYear()-1);
+    const cur = []; const prev = [];
+    for (let d=new Date(start); d<=end; d.setDate(d.getDate()+1)) cur.push(fmtDate(d));
+    for (let d=new Date(yStart); d<=yEnd; d.setDate(d.getDate()+1)) prev.push(fmtDate(d));
+    return [cur, prev];
+  }
+  function monthRange(offset) {
+    // offset 0 = last full month, 1 = one before
+    const ref = parseDate(lastDate);
+    const endD = new Date(ref.getFullYear(), ref.getMonth() - offset, 0);
+    const startD = new Date(endD.getFullYear(), endD.getMonth(), 1);
+    const out = [];
+    for (let d=new Date(startD); d<=endD; d.setDate(d.getDate()+1)) out.push(fmtDate(d));
+    return out;
+  }
+
+  let curDates, prevDates, label;
+  if (preset === 'last7') { curDates = rangeOffset(7,0); prevDates = rangeOffset(7,7); label = 'Last 7 days vs Previous 7'; }
+  else if (preset === 'last28') { curDates = rangeOffset(28,0); prevDates = rangeOffset(28,28); label = 'Last 28 days vs Previous 28'; }
+  else if (preset === 'last90') { curDates = rangeOffset(90,0); prevDates = rangeOffset(90,90); label = 'Last 90 days vs Previous 90'; }
+  else if (preset === 'monthPrev') { curDates = monthRange(0); prevDates = monthRange(1); label = 'Last full month vs Previous month'; }
+  else if (preset === 'last28yoy') { [curDates, prevDates] = yoyRange(28); label = 'Last 28 days — YoY'; }
+  else if (preset === 'last90yoy') { [curDates, prevDates] = yoyRange(90); label = 'Last 90 days — YoY'; }
+  else if (preset === 'monthYoY') {
+    curDates = monthRange(0);
+    prevDates = curDates.map(d => shiftYear(d, -1));
+    label = 'Last full month — YoY';
+  }
+
+  const metrics = ['sessions','users','conversions'];
+  if (market !== 'All Markets') metrics.push('revenue');
+  const showMarket = market;
+
+  const rows = metrics.map(m => {
+    const cur = ga4SumPeriod(curDates, showMarket, m);
+    const prev = ga4SumPeriod(prevDates, showMarket, m);
+    const currency = (m === 'revenue') ? (DATA.ga4.currencies[showMarket] || '') : '';
+    return { metric: m, cur, prev, currency };
+  });
+
+  // Also compute CVR as a derived metric
+  const curSess = ga4SumPeriod(curDates, showMarket, 'sessions');
+  const prevSess = ga4SumPeriod(prevDates, showMarket, 'sessions');
+  const curConv = ga4SumPeriod(curDates, showMarket, 'conversions');
+  const prevConv = ga4SumPeriod(prevDates, showMarket, 'conversions');
+  const curCvr = curSess > 0 ? curConv/curSess*100 : 0;
+  const prevCvr = prevSess > 0 ? prevConv/prevSess*100 : 0;
+
+  let html = `<div style="margin:12px 0 8px;color:var(--muted);font-size:13px"><strong>${label}</strong> &mdash; ${showMarket}<br>
+    Current: ${curDates[0]} → ${curDates[curDates.length-1]} &nbsp;·&nbsp; Previous: ${prevDates[0]} → ${prevDates[prevDates.length-1]}</div>`;
+  html += '<div class="kpi-row">';
+  rows.forEach(r => {
+    const label = r.metric.charAt(0).toUpperCase() + r.metric.slice(1);
+    const curDisplay = r.currency ? fmtMoney(r.cur, r.currency) : fmtN(Math.round(r.cur));
+    const prevDisplay = r.currency ? fmtMoney(r.prev, r.currency) : fmtN(Math.round(r.prev));
+    html += `<div class="kpi"><div class="label">${label}</div><div class="value">${curDisplay}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${prevDisplay} ${deltaSpan(r.cur, r.prev)}</div></div>`;
+  });
+  html += `<div class="kpi"><div class="label">Conv. rate</div><div class="value">${curCvr.toFixed(2)}%</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${prevCvr.toFixed(2)}% ${deltaSpan(curCvr, prevCvr)}</div></div>`;
+  html += '</div>';
+
+  document.getElementById('ga4-comp-results').innerHTML = html;
+}
+
+document.getElementById('ga4-market-filter').addEventListener('change', () => { renderGa4DailyChart(); runGa4Comparison(); });
+document.getElementById('ga4-metric-filter').addEventListener('change', () => { renderGa4DailyChart(); renderGa4MarketCharts(); });
+document.getElementById('ga4-rolling').addEventListener('change', renderGa4DailyChart);
+document.getElementById('ga4-comp-preset').addEventListener('change', runGa4Comparison);
 
 // ─── Boot ───
 loadAll();
