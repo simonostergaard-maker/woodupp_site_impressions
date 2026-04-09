@@ -1,16 +1,43 @@
 """
 Preprocesses the WoodUpp GSC data into optimized JSON files for the dashboard.
 Handles domain detection, country mapping, and aggregation.
+
+Also optionally pulls Google Analytics 4 data from BigQuery if credentials are
+available. Looks for a service account JSON one directory above the project
+folder (same place as the GSC CSV). Falls back gracefully if missing.
 """
 import pandas as pd
 import json
 import os
+import re
+from datetime import date, timedelta
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 SOURCE_CSV = Path(__file__).parent.parent / "woodupp_url_impressions.csv"
+
+# ─── BigQuery / GA4 configuration ───
+GA4_PROJECT_ID = "obsidian-375910"
+GA4_TABLE = "obsidian-375910.woodupp.ga4"
+GA4_YEARS_BACK = 2  # pull last 2 years of GA4 data
+
+def find_ga4_credentials():
+    """Look for a GA4 service account JSON one level above the project dir.
+
+    Priority:
+    1. GOOGLE_APPLICATION_CREDENTIALS env var (if set)
+    2. Any file matching obsidian-*.json in the parent directory
+    """
+    env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if env and Path(env).exists():
+        return Path(env)
+    parent = Path(__file__).parent.parent
+    candidates = sorted(parent.glob("obsidian-*.json"))
+    if candidates:
+        return candidates[0]
+    return None
 
 # Map site_url / country_code to readable market names
 DOMAIN_MARKET_MAP = {
@@ -646,6 +673,249 @@ def generate_keyword_daily(df):
     return result
 
 
+# ═════════════════════════════════════════════════════════════
+# GA4 / BigQuery integration
+# ═════════════════════════════════════════════════════════════
+
+# Map GA4 account_name suffix (2-letter code) to the GSC market key used
+# elsewhere in the dashboard. Kept in sync with DOMAIN_MARKET_MAP's markets.
+GA4_ACCOUNT_TO_MARKET = {
+    "AE": "UAE",
+    "AT": "Austria",
+    "AU": "Australia",
+    "BE": "Belgium",
+    "CH": "Switzerland",
+    "UK": "United Kingdom",
+    "GB": "United Kingdom",
+    "ZA": "South Africa",
+    "COM": "Global (.com)",
+    "EU": "Global (.com)",  # "GA4 - WoodUpp COM (EU)" is treated as the global .com market
+    "US": "USA",
+    "USA": "USA",
+    "DE": "Germany",
+    "DK": "Denmark",
+    "ES": "Spain",
+    "FR": "France",
+    "IT": "Italy",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "PL": "Poland",
+    "PT": "Portugal",
+    "SE": "Sweden",
+}
+
+# Per-market local currency (best-effort). Used only for display in the UI.
+MARKET_CURRENCY = {
+    "UAE": "AED",
+    "Austria": "EUR",
+    "Australia": "AUD",
+    "Belgium": "EUR",
+    "Switzerland": "CHF",
+    "United Kingdom": "GBP",
+    "South Africa": "ZAR",
+    "Global (.com)": "EUR",
+    "USA": "USD",
+    "Germany": "EUR",
+    "Denmark": "DKK",
+    "Spain": "EUR",
+    "France": "EUR",
+    "Italy": "EUR",
+    "Netherlands": "EUR",
+    "Norway": "NOK",
+    "Poland": "PLN",
+    "Portugal": "EUR",
+    "Sweden": "SEK",
+}
+
+
+def parse_ga4_account_name(name):
+    """Extract the market name from a GA4 account_name string.
+
+    Handles trailing flag emojis, extra whitespace, and parenthetical codes.
+
+    Examples handled:
+        "GA4 - WoodUpp DE \U0001F1E9\U0001F1EA "    -> "Germany"
+        "GA4 - WoodUpp UK \U0001F1EC\U0001F1E7 "    -> "United Kingdom"
+        "GA4 - WoodUpp COM (EU)"                    -> "Global (.com)"
+        "GA4 - WoodUpp USA \U0001F1FA\U0001F1F8 "   -> "USA"
+    """
+    if not isinstance(name, str):
+        return None
+    # 1) Prefer parenthetical code if present: "COM (EU)" -> "EU"
+    paren = re.search(r"\(([A-Za-z]{2,3})\)", name)
+    if paren:
+        code = paren.group(1).upper()
+        if code in GA4_ACCOUNT_TO_MARKET:
+            return GA4_ACCOUNT_TO_MARKET[code]
+
+    # 2) Strip parenthetical groups, then find every 2-3 letter uppercase
+    #    ASCII token (flag emojis and lowercase words are ignored). Pick
+    #    the last one that exists in the mapping. "GA" from "GA4" never
+    #    matches because \b requires a word boundary after, and "4" is a
+    #    word char — so it's safely excluded.
+    cleaned = re.sub(r"\s*\([^)]*\)", "", name)
+    codes = re.findall(r"\b([A-Z]{2,3})\b", cleaned)
+    for code in reversed(codes):
+        if code in GA4_ACCOUNT_TO_MARKET:
+            return GA4_ACCOUNT_TO_MARKET[code]
+    return None
+
+
+def load_ga4_from_bigquery():
+    """Query GA4 organic search data from BigQuery for the last N years.
+
+    Returns a pandas DataFrame with columns: date, market, sessions,
+    totalusers, conversions, totalrevenue. Returns None if the BigQuery
+    client or credentials are unavailable.
+    """
+    creds_path = find_ga4_credentials()
+    if not creds_path:
+        print("  [GA4] No service account credentials found — skipping BigQuery step.")
+        print("        Place obsidian-*.json one directory above the project folder,")
+        print("        or set GOOGLE_APPLICATION_CREDENTIALS.")
+        return None
+
+    try:
+        from google.cloud import bigquery
+        from google.oauth2 import service_account
+    except ImportError:
+        print("  [GA4] google-cloud-bigquery not installed — skipping.")
+        print("        Install with: pip install google-cloud-bigquery")
+        return None
+
+    print(f"  [GA4] Using credentials: {creds_path}")
+    credentials = service_account.Credentials.from_service_account_file(
+        str(creds_path),
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+    client = bigquery.Client(credentials=credentials, project=GA4_PROJECT_ID)
+
+    cutoff = (date.today() - timedelta(days=GA4_YEARS_BACK * 365)).isoformat()
+    query = f"""
+        SELECT
+            DATE(date) AS date,
+            account_name,
+            SUM(sessions) AS sessions,
+            SUM(totalusers) AS totalusers,
+            SUM(conversions) AS conversions,
+            SUM(totalrevenue) AS totalrevenue
+        FROM `{GA4_TABLE}`
+        WHERE session_default_channel_group = 'Organic Search'
+          AND DATE(date) >= DATE('{cutoff}')
+        GROUP BY date, account_name
+        ORDER BY date
+    """
+    print(f"  [GA4] Querying {GA4_TABLE} since {cutoff}...")
+    df = client.query(query).to_dataframe()
+    print(f"  [GA4] Retrieved {len(df):,} rows")
+
+    if df.empty:
+        return df
+
+    df["market"] = df["account_name"].map(parse_ga4_account_name)
+    unmapped = df[df["market"].isna()]["account_name"].unique()
+    if len(unmapped):
+        print(f"  [GA4] Warning: unmapped account_names: {list(unmapped)}")
+    df = df.dropna(subset=["market"])
+
+    df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+    for col in ["sessions", "totalusers", "conversions"]:
+        df[col] = df[col].fillna(0).astype(int)
+    df["totalrevenue"] = df["totalrevenue"].fillna(0).astype(float).round(2)
+
+    # Collapse duplicates (e.g. COM + EU → Global (.com)) by summing
+    df = df.groupby(["date", "market"], as_index=False).agg(
+        sessions=("sessions", "sum"),
+        totalusers=("totalusers", "sum"),
+        conversions=("conversions", "sum"),
+        totalrevenue=("totalrevenue", "sum"),
+    )
+    return df
+
+
+def generate_ga4_data(ga_df):
+    """Build the ga4.json payload from the GA4 DataFrame.
+
+    Structure:
+        {
+            "has_data": bool,
+            "date_range": {"start": "...", "end": "..."},
+            "markets": ["Germany", ...],
+            "currencies": {"Germany": "EUR", ...},
+            "daily": {
+                "YYYY-MM-DD": {
+                    "Germany":   {"sessions":..., "users":..., "conversions":..., "revenue":...},
+                    "All Markets": {...}
+                }
+            },
+            "totals_per_market": {
+                "Germany": {"sessions":..., "users":..., "conversions":..., "revenue":...}
+            },
+            "totals_all": {"sessions":..., "users":..., "conversions":..., "revenue":...}
+        }
+    """
+    if ga_df is None or ga_df.empty:
+        return {"has_data": False}
+
+    markets = sorted(ga_df["market"].unique().tolist())
+    dates = sorted(ga_df["date"].unique().tolist())
+
+    daily = {}
+    for _, row in ga_df.iterrows():
+        d = row["date"]
+        if d not in daily:
+            daily[d] = {}
+        daily[d][row["market"]] = {
+            "sessions": int(row["sessions"]),
+            "users": int(row["totalusers"]),
+            "conversions": int(row["conversions"]),
+            "revenue": float(round(row["totalrevenue"], 2)),
+        }
+
+    # Daily "All Markets" totals (revenue intentionally summed as mixed-currency —
+    # UI should display per-market revenue, not the combined number.)
+    all_daily = ga_df.groupby("date", as_index=False).agg(
+        sessions=("sessions", "sum"),
+        totalusers=("totalusers", "sum"),
+        conversions=("conversions", "sum"),
+    )
+    for _, row in all_daily.iterrows():
+        daily[row["date"]]["All Markets"] = {
+            "sessions": int(row["sessions"]),
+            "users": int(row["totalusers"]),
+            "conversions": int(row["conversions"]),
+            "revenue": 0,  # mixed currency — not meaningful to sum
+        }
+
+    totals_per_market = {}
+    for m in markets:
+        mdf = ga_df[ga_df["market"] == m]
+        totals_per_market[m] = {
+            "sessions": int(mdf["sessions"].sum()),
+            "users": int(mdf["totalusers"].sum()),
+            "conversions": int(mdf["conversions"].sum()),
+            "revenue": float(round(mdf["totalrevenue"].sum(), 2)),
+            "currency": MARKET_CURRENCY.get(m, ""),
+        }
+
+    totals_all = {
+        "sessions": int(ga_df["sessions"].sum()),
+        "users": int(ga_df["totalusers"].sum()),
+        "conversions": int(ga_df["conversions"].sum()),
+    }
+
+    return {
+        "has_data": True,
+        "date_range": {"start": dates[0], "end": dates[-1]},
+        "dates": dates,
+        "markets": markets,
+        "currencies": {m: MARKET_CURRENCY.get(m, "") for m in markets},
+        "daily": daily,
+        "totals_per_market": totals_per_market,
+        "totals_all": totals_all,
+    }
+
+
 def main():
     df = load_and_clean()
 
@@ -708,6 +978,22 @@ def main():
     with open(DATA_DIR / "keyword_daily.json", "w") as f:
         json.dump(kw_daily, f)
     print(f"  Saved keyword_daily.json")
+
+    print("\nPulling GA4 data from BigQuery...")
+    try:
+        ga_df = load_ga4_from_bigquery()
+        ga_payload = generate_ga4_data(ga_df)
+    except Exception as e:
+        print(f"  [GA4] Error fetching GA4 data: {e}")
+        print(f"  [GA4] Continuing without GA4 data.")
+        ga_payload = {"has_data": False, "error": str(e)}
+    with open(DATA_DIR / "ga4.json", "w") as f:
+        json.dump(ga_payload, f)
+    if ga_payload.get("has_data"):
+        print(f"  Saved ga4.json — {len(ga_payload.get('dates', []))} days, "
+              f"{len(ga_payload.get('markets', []))} markets")
+    else:
+        print(f"  Saved ga4.json (empty placeholder — will be picked up once credentials are present)")
 
     print("\nDone! All data files saved to", DATA_DIR)
 
