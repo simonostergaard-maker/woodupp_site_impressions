@@ -731,27 +731,34 @@ MARKET_CURRENCY = {
 def parse_ga4_account_name(name):
     """Extract the market name from a GA4 account_name string.
 
+    Handles trailing flag emojis, extra whitespace, and parenthetical codes.
+
     Examples handled:
-        "GA4 - WoodUpp DE"          -> "Germany"
-        "GA4 - WoodUpp UK"          -> "United Kingdom"
-        "GA4 - WoodUpp COM (EU)"    -> "Global (.com)"
-        "GA4 - WoodUpp USA"         -> "USA"
+        "GA4 - WoodUpp DE \U0001F1E9\U0001F1EA "    -> "Germany"
+        "GA4 - WoodUpp UK \U0001F1EC\U0001F1E7 "    -> "United Kingdom"
+        "GA4 - WoodUpp COM (EU)"                    -> "Global (.com)"
+        "GA4 - WoodUpp USA \U0001F1FA\U0001F1F8 "   -> "USA"
     """
     if not isinstance(name, str):
         return None
-    # Prefer parenthetical code if present: "COM (EU)" -> "EU"
-    paren = re.search(r"\(([A-Z]{2,3})\)", name)
+    # 1) Prefer parenthetical code if present: "COM (EU)" -> "EU"
+    paren = re.search(r"\(([A-Za-z]{2,3})\)", name)
     if paren:
         code = paren.group(1).upper()
         if code in GA4_ACCOUNT_TO_MARKET:
             return GA4_ACCOUNT_TO_MARKET[code]
-    # Otherwise take the last token (skip parenthetical group)
-    cleaned = re.sub(r"\s*\([^)]*\)", "", name).strip()
-    tokens = cleaned.split()
-    if not tokens:
-        return None
-    code = tokens[-1].upper()
-    return GA4_ACCOUNT_TO_MARKET.get(code)
+
+    # 2) Strip parenthetical groups, then find every 2-3 letter uppercase
+    #    ASCII token (flag emojis and lowercase words are ignored). Pick
+    #    the last one that exists in the mapping. "GA" from "GA4" never
+    #    matches because \b requires a word boundary after, and "4" is a
+    #    word char — so it's safely excluded.
+    cleaned = re.sub(r"\s*\([^)]*\)", "", name)
+    codes = re.findall(r"\b([A-Z]{2,3})\b", cleaned)
+    for code in reversed(codes):
+        if code in GA4_ACCOUNT_TO_MARKET:
+            return GA4_ACCOUNT_TO_MARKET[code]
+    return None
 
 
 def load_ga4_from_bigquery():
