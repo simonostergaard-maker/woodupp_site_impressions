@@ -674,6 +674,130 @@ def generate_keyword_daily(df):
 
 
 # ═════════════════════════════════════════════════════════════
+# Brand vs Non-Brand classification
+# ═════════════════════════════════════════════════════════════
+
+# Matches woodupp, woodup, wood-upp, wood upp, etc.
+BRAND_REGEX = re.compile(r"wood\s*-?\s*up", re.IGNORECASE)
+
+
+def classify_query(q):
+    if not isinstance(q, str) or not q:
+        return None
+    return "brand" if BRAND_REGEX.search(q) else "nonbrand"
+
+
+def _agg_brand_segment(seg_df):
+    if seg_df is None or seg_df.empty:
+        return {"impressions": 0, "clicks": 0, "queries": 0, "avg_position": 0, "ctr": 0}
+    imp = int(seg_df["impressions"].sum())
+    clk = int(seg_df["clicks"].sum())
+    pos_sum = float(seg_df["sum_position"].sum())
+    return {
+        "impressions": imp,
+        "clicks": clk,
+        "queries": int(seg_df["query"].nunique()),
+        "avg_position": round(pos_sum / imp, 1) if imp > 0 else 0,
+        "ctr": round(clk / imp * 100, 2) if imp > 0 else 0,
+    }
+
+
+def generate_brand_analysis(df):
+    """Brand vs non-brand search insights.
+
+    Brand share is computed only over *known* (non-anonymized) queries. The
+    anonymized share is reported separately as context — it cannot be
+    classified, since Google hides the actual query text.
+    """
+    known = df[(~df["is_anonymized_query"]) & df["query"].notna() & (df["query"] != "")].copy()
+    known["segment"] = known["query"].apply(classify_query)
+    known = known[known["segment"].notna()]
+    anon = df[df["is_anonymized_query"]]
+
+    brand_df = known[known["segment"] == "brand"]
+    nonbrand_df = known[known["segment"] == "nonbrand"]
+
+    overall = {
+        "brand": _agg_brand_segment(brand_df),
+        "nonbrand": _agg_brand_segment(nonbrand_df),
+        "anonymized": {
+            "impressions": int(anon["impressions"].sum()),
+            "clicks": int(anon["clicks"].sum()),
+        },
+    }
+
+    by_market = {}
+    for market in sorted(known["market"].unique()):
+        mdf = known[known["market"] == market]
+        manon = anon[anon["market"] == market]
+        by_market[market] = {
+            "brand": _agg_brand_segment(mdf[mdf["segment"] == "brand"]),
+            "nonbrand": _agg_brand_segment(mdf[mdf["segment"] == "nonbrand"]),
+            "anonymized": {
+                "impressions": int(manon["impressions"].sum()),
+                "clicks": int(manon["clicks"].sum()),
+            },
+        }
+
+    # Daily series (per-market + All Markets) for trend charts and comparisons
+    daily = {}
+
+    daily_market = known.groupby(["data_date", "market", "segment"]).agg(
+        impressions=("impressions", "sum"),
+        clicks=("clicks", "sum"),
+    ).reset_index()
+    for _, row in daily_market.iterrows():
+        d, m, seg = row["data_date"], row["market"], row["segment"]
+        if d not in daily:
+            daily[d] = {}
+        if m not in daily[d]:
+            daily[d][m] = {"brand": {"impressions": 0, "clicks": 0}, "nonbrand": {"impressions": 0, "clicks": 0}}
+        daily[d][m][seg] = {"impressions": int(row["impressions"]), "clicks": int(row["clicks"])}
+
+    daily_all = known.groupby(["data_date", "segment"]).agg(
+        impressions=("impressions", "sum"),
+        clicks=("clicks", "sum"),
+    ).reset_index()
+    for _, row in daily_all.iterrows():
+        d, seg = row["data_date"], row["segment"]
+        if d not in daily:
+            daily[d] = {}
+        if "All Markets" not in daily[d]:
+            daily[d]["All Markets"] = {"brand": {"impressions": 0, "clicks": 0}, "nonbrand": {"impressions": 0, "clicks": 0}}
+        daily[d]["All Markets"][seg] = {"impressions": int(row["impressions"]), "clicks": int(row["clicks"])}
+
+    def _top_queries(seg_df, n=30):
+        if seg_df.empty:
+            return []
+        agg = seg_df.groupby("query").agg(
+            impressions=("impressions", "sum"),
+            clicks=("clicks", "sum"),
+            sum_position=("sum_position", "sum"),
+            market_count=("market", "nunique"),
+        ).reset_index()
+        agg["avg_position"] = (agg["sum_position"] / agg["impressions"]).round(1)
+        agg["ctr"] = (agg["clicks"] / agg["impressions"] * 100).round(2)
+        top = agg.nlargest(n, "clicks")
+        return [{
+            "query": row["query"],
+            "impressions": int(row["impressions"]),
+            "clicks": int(row["clicks"]),
+            "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+            "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
+            "markets": int(row["market_count"]),
+        } for _, row in top.iterrows()]
+
+    return {
+        "overall": overall,
+        "by_market": by_market,
+        "daily": daily,
+        "top_brand": _top_queries(brand_df, 30),
+        "top_nonbrand": _top_queries(nonbrand_df, 30),
+        "brand_pattern": "wood\\s*-?\\s*up (case-insensitive)",
+    }
+
+
+# ═════════════════════════════════════════════════════════════
 # GA4 / BigQuery integration
 # ═════════════════════════════════════════════════════════════
 
@@ -978,6 +1102,15 @@ def main():
     with open(DATA_DIR / "keyword_daily.json", "w") as f:
         json.dump(kw_daily, f)
     print(f"  Saved keyword_daily.json")
+
+    print("Generating brand vs non-brand analysis...")
+    brand = generate_brand_analysis(df)
+    with open(DATA_DIR / "brand_analysis.json", "w") as f:
+        json.dump(brand, f)
+    o = brand["overall"]
+    bk = o["brand"]["clicks"]; nb = o["nonbrand"]["clicks"]; tot = bk + nb
+    bshare = (bk/tot*100) if tot > 0 else 0
+    print(f"  Saved brand_analysis.json — brand clicks share (of known): {bshare:.1f}%")
 
     print("\nPulling GA4 data from BigQuery...")
     try:
