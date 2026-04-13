@@ -190,6 +190,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
   <div class="tab" data-tab="anonymized">Anonymized Queries</div>
   <div class="tab" data-tab="urls">URL Performance</div>
   <div class="tab" data-tab="keywords">Keyword Performance</div>
+  <div class="tab" data-tab="brand">Brand vs Non-Brand</div>
   <div class="tab" data-tab="countries">Country Overview</div>
   <div class="tab" data-tab="domains">Domain Comparison</div>
   <div class="tab" data-tab="devices">Device & Search Type</div>
@@ -360,6 +361,79 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
         <div class="filter-group"><label>&nbsp;</label><button class="btn" onclick="runKwComparison()">Compare</button></div>
       </div>
       <div id="kw-comp-results"></div>
+    </div>
+  </div>
+
+  <!-- BRAND vs NON-BRAND -->
+  <div class="tab-content" id="tab-brand">
+    <div class="card" style="background:rgba(99,102,241,0.06);border-color:rgba(99,102,241,0.25)">
+      <h3>About this analysis</h3>
+      <p style="color:var(--muted);font-size:13px;line-height:1.6;margin:0">
+        <strong>Brand</strong> = query contains the pattern <code>wood\s*-?\s*up</code> (case-insensitive) — catches <em>woodupp, woodup, wood upp, wood-upp</em>, etc.
+        <strong>Non-brand</strong> = any other known query.
+        Brand share is computed only over <strong>known queries</strong>; the <strong>anonymized share</strong> is shown separately because Google hides those query texts and they cannot be classified.
+        Some markets are 60–70% anonymized, so always read brand share alongside anonymized share.
+      </p>
+    </div>
+
+    <div class="filters" style="flex-wrap:wrap">
+      <div class="filter-group"><label>Market</label><select id="brand-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Metric</label>
+        <select id="brand-metric-filter"><option value="clicks" selected>Clicks</option><option value="impressions">Impressions</option></select>
+      </div>
+      <div class="filter-group"><label>Rolling avg</label>
+        <select id="brand-rolling">
+          <option value="0">None</option>
+          <option value="7" selected>7-day</option>
+          <option value="28">28-day</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="brand-kpis"></div>
+
+    <div class="grid-2">
+      <div class="card"><h3 id="brand-daily-title">Daily Brand vs Non-Brand</h3><div class="chart-container tall" id="chart-brand-daily"></div></div>
+      <div class="card"><h3 id="brand-share-title">Brand Share Over Time (% of known)</h3><div class="chart-container tall" id="chart-brand-share"></div></div>
+    </div>
+
+    <div class="card">
+      <h3>Period comparison</h3>
+      <div class="filters" style="flex-wrap:wrap">
+        <div class="filter-group"><label>Preset</label>
+          <select id="brand-comp-preset">
+            <optgroup label="Sequential (vs previous period)">
+              <option value="last7">Last 7 days vs Previous 7</option>
+              <option value="last28" selected>Last 28 days vs Previous 28</option>
+              <option value="last90">Last 90 days vs Previous 90</option>
+              <option value="monthPrev">Last full month vs Previous month</option>
+            </optgroup>
+            <optgroup label="Year-over-Year">
+              <option value="last28yoy">Last 28 days — YoY</option>
+              <option value="last90yoy">Last 90 days — YoY</option>
+              <option value="monthYoY">Last full month — YoY</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="filter-group"><label>&nbsp;</label><button class="btn" onclick="runBrandComparison()">Compare</button></div>
+      </div>
+      <div id="brand-comp-results"></div>
+    </div>
+
+    <div class="card">
+      <h3>Brand share by market</h3>
+      <p style="color:var(--muted);font-size:12px;margin:-4px 0 8px">Sorted by brand-clicks share. Anonymized column shows what % of total impressions are unclassifiable.</p>
+      <div class="table-wrap" id="brand-market-table"></div>
+    </div>
+
+    <div class="card">
+      <h3 id="brand-market-bar-title">Brand vs Non-Brand by Market — Clicks</h3>
+      <div class="chart-container tall" id="chart-brand-market-bar"></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card"><h3>Top 30 Brand Queries</h3><div class="table-wrap" id="brand-top-brand-table"></div></div>
+      <div class="card"><h3>Top 30 Non-Brand Queries</h3><div class="table-wrap" id="brand-top-nonbrand-table"></div></div>
     </div>
   </div>
 
@@ -567,7 +641,7 @@ function makeChart(containerId, config) {
 
 // ─── Data Loading ───
 async function loadAll() {
-  const files = ['overview','daily_metrics','anonymized','url_performance','keyword_performance','country_data','device_search','serp_features','url_daily','keyword_daily'];
+  const files = ['overview','daily_metrics','anonymized','url_performance','keyword_performance','country_data','device_search','serp_features','url_daily','keyword_daily','brand_analysis'];
   const promises = files.map(f => fetch('data/'+f+'.json').then(r => r.json()));
   const results = await Promise.all(promises);
   files.forEach((f,i) => DATA[f] = results[i]);
@@ -678,6 +752,7 @@ function initApp() {
   setupComparison();
   renderYoY();
   renderTrends();
+  renderBrand();
   renderGa4();
 }
 
@@ -1656,6 +1731,311 @@ function renderTrends(market) {
   document.getElementById('trends-monthly-summary').innerHTML = mhtml;
 }
 document.getElementById('trends-market-filter').addEventListener('change', e => renderTrends(e.target.value));
+
+// ═══════════════════════════════════════════
+// TAB: BRAND vs NON-BRAND
+// ═══════════════════════════════════════════
+function brandHasData() { return DATA.brand_analysis && DATA.brand_analysis.daily && Object.keys(DATA.brand_analysis.daily).length > 0; }
+
+function brandSortedDates() {
+  return Object.keys(DATA.brand_analysis.daily).sort();
+}
+
+function brandGetSegmentValue(date, market, segment, metric) {
+  const day = DATA.brand_analysis.daily[date];
+  if (!day) return 0;
+  const m = day[market];
+  if (!m) return 0;
+  return (m[segment] && m[segment][metric]) || 0;
+}
+
+function brandSumPeriod(dates, market, segment, metric) {
+  return dates.reduce((s, d) => s + brandGetSegmentValue(d, market, segment, metric), 0);
+}
+
+function renderBrand() {
+  if (!brandHasData()) return;
+
+  // Populate market dropdown
+  const sel = document.getElementById('brand-market-filter');
+  sel.innerHTML = '<option value="All Markets">All Markets</option>';
+  Object.keys(DATA.brand_analysis.by_market).sort().forEach(m => {
+    const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o);
+  });
+
+  renderBrandKpis();
+  renderBrandDailyChart();
+  renderBrandShareChart();
+  renderBrandMarketTable();
+  renderBrandMarketBar();
+  renderBrandTopQueries();
+  runBrandComparison();
+}
+
+function renderBrandKpis() {
+  const market = document.getElementById('brand-market-filter').value;
+  const totals = (market === 'All Markets') ? DATA.brand_analysis.overall : DATA.brand_analysis.by_market[market];
+  if (!totals) { document.getElementById('brand-kpis').innerHTML = ''; return; }
+
+  const b = totals.brand, n = totals.nonbrand, a = totals.anonymized;
+  const knownClicks = b.clicks + n.clicks;
+  const knownImp = b.impressions + n.impressions;
+  const totalImp = knownImp + a.impressions;
+  const totalClk = knownClicks + a.clicks;
+  const brandClkShare = knownClicks > 0 ? (b.clicks/knownClicks*100) : 0;
+  const brandImpShare = knownImp > 0 ? (b.impressions/knownImp*100) : 0;
+  const anonImpShare = totalImp > 0 ? (a.impressions/totalImp*100) : 0;
+
+  // Last-28-day deltas (only meaningful for All Markets / a single market on daily series)
+  const dates = brandSortedDates();
+  const last28 = dates.slice(-28), prev28 = dates.slice(-56, -28);
+  const curBClk = brandSumPeriod(last28, market, 'brand', 'clicks');
+  const prevBClk = brandSumPeriod(prev28, market, 'brand', 'clicks');
+  const curNClk = brandSumPeriod(last28, market, 'nonbrand', 'clicks');
+  const prevNClk = brandSumPeriod(prev28, market, 'nonbrand', 'clicks');
+  const curBShare = (curBClk+curNClk) > 0 ? curBClk/(curBClk+curNClk)*100 : 0;
+  const prevBShare = (prevBClk+prevNClk) > 0 ? prevBClk/(prevBClk+prevNClk)*100 : 0;
+
+  document.getElementById('brand-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Brand clicks (all-time)</div><div class="value blue">${fmtN(b.clicks)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Last 28d: ${deltaSpan(curBClk, prevBClk)}</div></div>
+      <div class="kpi"><div class="label">Non-brand clicks (all-time)</div><div class="value green">${fmtN(n.clicks)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Last 28d: ${deltaSpan(curNClk, prevNClk)}</div></div>
+      <div class="kpi"><div class="label">Brand share (clicks, of known)</div><div class="value orange">${brandClkShare.toFixed(1)}%</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Last 28d: ${deltaSpan(curBShare, prevBShare)}</div></div>
+      <div class="kpi"><div class="label">Brand share (impressions)</div><div class="value purple">${brandImpShare.toFixed(1)}%</div></div>
+      <div class="kpi"><div class="label">Anonymized share (impressions)</div><div class="value cyan">${anonImpShare.toFixed(1)}%</div><div style="font-size:11px;color:var(--muted);margin-top:4px">unclassifiable</div></div>
+      <div class="kpi"><div class="label">Brand queries</div><div class="value pink">${fmtN(b.queries)}</div></div>
+      <div class="kpi"><div class="label">Non-brand queries</div><div class="value">${fmtN(n.queries)}</div></div>
+      <div class="kpi"><div class="label">Brand avg position</div><div class="value">${b.avg_position}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Non-brand: ${n.avg_position}</div></div>
+    </div>`;
+}
+
+function renderBrandDailyChart() {
+  const market = document.getElementById('brand-market-filter').value;
+  const metric = document.getElementById('brand-metric-filter').value;
+  const rolling = parseInt(document.getElementById('brand-rolling').value);
+  const dates = brandSortedDates();
+  const label = metric === 'clicks' ? 'Clicks' : 'Impressions';
+  document.getElementById('brand-daily-title').textContent = `Daily ${label} — Brand vs Non-Brand (${market})`;
+
+  const brandData = dates.map(d => brandGetSegmentValue(d, market, 'brand', metric));
+  const nonbrandData = dates.map(d => brandGetSegmentValue(d, market, 'nonbrand', metric));
+
+  const datasets = [
+    { label: 'Brand', data: brandData, borderColor: '#6366f1', backgroundColor: '#6366f120', fill: false, tension: 0.3, borderWidth: 2, pointRadius: dates.length > 60 ? 0 : 2 },
+    { label: 'Non-brand', data: nonbrandData, borderColor: '#22c55e', backgroundColor: '#22c55e20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: dates.length > 60 ? 0 : 2 },
+  ];
+  if (rolling > 0) {
+    datasets.push({ label: `Brand ${rolling}d avg`, data: rollingAvg(brandData, rolling), borderColor: '#6366f1', borderDash: [4,4], borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 });
+    datasets.push({ label: `Non-brand ${rolling}d avg`, data: rollingAvg(nonbrandData, rolling), borderColor: '#22c55e', borderDash: [4,4], borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 });
+  }
+
+  makeChart('chart-brand-daily', {
+    type: 'line',
+    data: { labels: dates.map(d => d.slice(5)), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b8fa3', font: { size: 11 }, boxWidth: 12 } } },
+      scales: {
+        x: { ticks: { color: '#8b8fa3', maxTicksLimit: 20 }, grid: { color: '#2a2d3a' } },
+        y: { ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2a2d3a' } }
+      }
+    }
+  });
+}
+
+function renderBrandShareChart() {
+  const market = document.getElementById('brand-market-filter').value;
+  const metric = document.getElementById('brand-metric-filter').value;
+  const rolling = parseInt(document.getElementById('brand-rolling').value);
+  const dates = brandSortedDates();
+  document.getElementById('brand-share-title').textContent = `Brand Share Over Time — % of known ${metric}`;
+
+  const shareData = dates.map(d => {
+    const b = brandGetSegmentValue(d, market, 'brand', metric);
+    const n = brandGetSegmentValue(d, market, 'nonbrand', metric);
+    return (b+n) > 0 ? +(b/(b+n)*100).toFixed(2) : null;
+  });
+
+  const datasets = [{
+    label: 'Brand share %',
+    data: shareData,
+    borderColor: '#f59e0b',
+    backgroundColor: '#f59e0b30',
+    fill: true, tension: 0.3, borderWidth: 2,
+    pointRadius: dates.length > 60 ? 0 : 2,
+  }];
+  if (rolling > 0) {
+    datasets.push({ label: `${rolling}d avg`, data: rollingAvg(shareData.map(v => v||0), rolling), borderColor: '#fbbf24', borderDash: [4,4], borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 });
+  }
+
+  makeChart('chart-brand-share', {
+    type: 'line',
+    data: { labels: dates.map(d => d.slice(5)), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b8fa3', font: { size: 11 }, boxWidth: 12 } } },
+      scales: {
+        x: { ticks: { color: '#8b8fa3', maxTicksLimit: 20 }, grid: { color: '#2a2d3a' } },
+        y: { ticks: { color: '#8b8fa3', callback: v => v+'%' }, grid: { color: '#2a2d3a' }, suggestedMin: 0, suggestedMax: 100 }
+      }
+    }
+  });
+}
+
+function renderBrandMarketTable() {
+  const bm = DATA.brand_analysis.by_market;
+  const rows = Object.entries(bm).map(([m, d]) => {
+    const knownClk = d.brand.clicks + d.nonbrand.clicks;
+    const knownImp = d.brand.impressions + d.nonbrand.impressions;
+    const totalImp = knownImp + d.anonymized.impressions;
+    return {
+      market: m,
+      brandClk: d.brand.clicks,
+      nonbrandClk: d.nonbrand.clicks,
+      brandShareClk: knownClk > 0 ? d.brand.clicks/knownClk*100 : 0,
+      brandShareImp: knownImp > 0 ? d.brand.impressions/knownImp*100 : 0,
+      anonImpShare: totalImp > 0 ? d.anonymized.impressions/totalImp*100 : 0,
+      brandPos: d.brand.avg_position,
+      nonbrandPos: d.nonbrand.avg_position,
+      brandCtr: d.brand.ctr,
+      nonbrandCtr: d.nonbrand.ctr,
+    };
+  }).sort((a,b) => b.brandShareClk - a.brandShareClk);
+
+  let html = '<table><thead><tr><th>Market</th><th>Brand share<br>(clicks)</th><th>Brand share<br>(impressions)</th><th>Anon share<br>(impressions)</th><th>Brand clicks</th><th>Non-brand clicks</th><th>Brand CTR</th><th>NB CTR</th><th>Brand pos</th><th>NB pos</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    html += `<tr><td>${r.market}</td><td><strong>${r.brandShareClk.toFixed(1)}%</strong></td><td>${r.brandShareImp.toFixed(1)}%</td><td style="color:var(--muted)">${r.anonImpShare.toFixed(1)}%</td><td>${fmtN(r.brandClk)}</td><td>${fmtN(r.nonbrandClk)}</td><td>${r.brandCtr}%</td><td>${r.nonbrandCtr}%</td><td>${r.brandPos}</td><td>${r.nonbrandPos}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('brand-market-table').innerHTML = html;
+}
+
+function renderBrandMarketBar() {
+  const metric = document.getElementById('brand-metric-filter').value;
+  const bm = DATA.brand_analysis.by_market;
+  const entries = Object.entries(bm).map(([m, d]) => ({
+    market: m,
+    brand: d.brand[metric],
+    nonbrand: d.nonbrand[metric],
+    total: d.brand[metric] + d.nonbrand[metric],
+  })).sort((a,b) => b.total - a.total);
+
+  document.getElementById('brand-market-bar-title').textContent = `Brand vs Non-Brand by Market — ${metric.charAt(0).toUpperCase()+metric.slice(1)}`;
+  makeChart('chart-brand-market-bar', {
+    type: 'bar',
+    data: {
+      labels: entries.map(e => e.market),
+      datasets: [
+        { label: 'Brand', data: entries.map(e => e.brand), backgroundColor: '#6366f1', stack: 's' },
+        { label: 'Non-brand', data: entries.map(e => e.nonbrand), backgroundColor: '#22c55e', stack: 's' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b8fa3', font: { size: 11 }, boxWidth: 12 } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b8fa3', callback: v => fmt(v) }, grid: { color: '#2a2d3a' } },
+        y: { stacked: true, ticks: { color: '#8b8fa3', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function renderBrandTopQueries() {
+  function buildTable(rows) {
+    if (!rows.length) return '<div style="color:var(--muted);padding:8px">No data</div>';
+    let h = '<table><thead><tr><th>Query</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Pos</th><th>Markets</th></tr></thead><tbody>';
+    rows.forEach(r => {
+      h += `<tr><td>${r.query}</td><td>${fmtN(r.clicks)}</td><td>${fmtN(r.impressions)}</td><td>${r.ctr}%</td><td>${r.avg_position}</td><td>${r.markets}</td></tr>`;
+    });
+    h += '</tbody></table>';
+    return h;
+  }
+  document.getElementById('brand-top-brand-table').innerHTML = buildTable(DATA.brand_analysis.top_brand);
+  document.getElementById('brand-top-nonbrand-table').innerHTML = buildTable(DATA.brand_analysis.top_nonbrand);
+}
+
+function runBrandComparison() {
+  if (!brandHasData()) return;
+  const preset = document.getElementById('brand-comp-preset').value;
+  const market = document.getElementById('brand-market-filter').value;
+  const dates = brandSortedDates();
+  const lastDate = dates[dates.length-1];
+
+  function rangeOffset(days, offset) {
+    const end = dates.length - 1 - offset;
+    const start = end - days + 1;
+    if (start < 0) return [];
+    return dates.slice(start, end + 1);
+  }
+  function yoyRange(days) {
+    const end = parseDate(lastDate);
+    const start = new Date(end); start.setDate(start.getDate() - days + 1);
+    const yEnd = new Date(end); yEnd.setFullYear(yEnd.getFullYear()-1);
+    const yStart = new Date(start); yStart.setFullYear(yStart.getFullYear()-1);
+    const cur = []; const prev = [];
+    for (let d=new Date(start); d<=end; d.setDate(d.getDate()+1)) cur.push(fmtDate(d));
+    for (let d=new Date(yStart); d<=yEnd; d.setDate(d.getDate()+1)) prev.push(fmtDate(d));
+    return [cur, prev];
+  }
+  function monthRange(offset) {
+    const ref = parseDate(lastDate);
+    const endD = new Date(ref.getFullYear(), ref.getMonth() - offset, 0);
+    const startD = new Date(endD.getFullYear(), endD.getMonth(), 1);
+    const out = [];
+    for (let d=new Date(startD); d<=endD; d.setDate(d.getDate()+1)) out.push(fmtDate(d));
+    return out;
+  }
+
+  let curDates, prevDates, label;
+  if (preset === 'last7') { curDates = rangeOffset(7,0); prevDates = rangeOffset(7,7); label = 'Last 7 days vs Previous 7'; }
+  else if (preset === 'last28') { curDates = rangeOffset(28,0); prevDates = rangeOffset(28,28); label = 'Last 28 days vs Previous 28'; }
+  else if (preset === 'last90') { curDates = rangeOffset(90,0); prevDates = rangeOffset(90,90); label = 'Last 90 days vs Previous 90'; }
+  else if (preset === 'monthPrev') { curDates = monthRange(0); prevDates = monthRange(1); label = 'Last full month vs Previous month'; }
+  else if (preset === 'last28yoy') { [curDates, prevDates] = yoyRange(28); label = 'Last 28 days — YoY'; }
+  else if (preset === 'last90yoy') { [curDates, prevDates] = yoyRange(90); label = 'Last 90 days — YoY'; }
+  else if (preset === 'monthYoY') {
+    curDates = monthRange(0);
+    prevDates = curDates.map(d => shiftYear(d, -1));
+    label = 'Last full month — YoY';
+  }
+
+  function block(segment) {
+    const curImp = brandSumPeriod(curDates, market, segment, 'impressions');
+    const prevImp = brandSumPeriod(prevDates, market, segment, 'impressions');
+    const curClk = brandSumPeriod(curDates, market, segment, 'clicks');
+    const prevClk = brandSumPeriod(prevDates, market, segment, 'clicks');
+    const curCtr = curImp > 0 ? curClk/curImp*100 : 0;
+    const prevCtr = prevImp > 0 ? prevClk/prevImp*100 : 0;
+    return { curImp, prevImp, curClk, prevClk, curCtr, prevCtr };
+  }
+  const b = block('brand');
+  const n = block('nonbrand');
+
+  // Brand share of clicks
+  const curShare = (b.curClk+n.curClk) > 0 ? b.curClk/(b.curClk+n.curClk)*100 : 0;
+  const prevShare = (b.prevClk+n.prevClk) > 0 ? b.prevClk/(b.prevClk+n.prevClk)*100 : 0;
+
+  let html = `<div style="margin:12px 0 8px;color:var(--muted);font-size:13px"><strong>${label}</strong> — ${market}<br>
+    Current: ${curDates[0]} → ${curDates[curDates.length-1]} &nbsp;·&nbsp; Previous: ${prevDates[0]} → ${prevDates[prevDates.length-1]}</div>`;
+
+  html += '<div class="kpi-row">';
+  html += `<div class="kpi"><div class="label">Brand clicks</div><div class="value blue">${fmtN(b.curClk)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${fmtN(b.prevClk)} ${deltaSpan(b.curClk, b.prevClk)}</div></div>`;
+  html += `<div class="kpi"><div class="label">Non-brand clicks</div><div class="value green">${fmtN(n.curClk)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${fmtN(n.prevClk)} ${deltaSpan(n.curClk, n.prevClk)}</div></div>`;
+  html += `<div class="kpi"><div class="label">Brand impressions</div><div class="value">${fmtN(b.curImp)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${fmtN(b.prevImp)} ${deltaSpan(b.curImp, b.prevImp)}</div></div>`;
+  html += `<div class="kpi"><div class="label">Non-brand impressions</div><div class="value">${fmtN(n.curImp)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${fmtN(n.prevImp)} ${deltaSpan(n.curImp, n.prevImp)}</div></div>`;
+  html += `<div class="kpi"><div class="label">Brand share (clicks)</div><div class="value orange">${curShare.toFixed(1)}%</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${prevShare.toFixed(1)}% ${deltaSpan(curShare, prevShare)}</div></div>`;
+  html += `<div class="kpi"><div class="label">Brand CTR</div><div class="value">${b.curCtr.toFixed(2)}%</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${b.prevCtr.toFixed(2)}% ${deltaSpan(b.curCtr, b.prevCtr)}</div></div>`;
+  html += `<div class="kpi"><div class="label">Non-brand CTR</div><div class="value">${n.curCtr.toFixed(2)}%</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Prev: ${n.prevCtr.toFixed(2)}% ${deltaSpan(n.curCtr, n.prevCtr)}</div></div>`;
+  html += '</div>';
+
+  document.getElementById('brand-comp-results').innerHTML = html;
+}
+
+document.getElementById('brand-market-filter').addEventListener('change', () => { renderBrandKpis(); renderBrandDailyChart(); renderBrandShareChart(); runBrandComparison(); });
+document.getElementById('brand-metric-filter').addEventListener('change', () => { renderBrandDailyChart(); renderBrandShareChart(); renderBrandMarketBar(); });
+document.getElementById('brand-rolling').addEventListener('change', () => { renderBrandDailyChart(); renderBrandShareChart(); });
+document.getElementById('brand-comp-preset').addEventListener('change', runBrandComparison);
 
 // ═══════════════════════════════════════════
 // TAB: GOOGLE ANALYTICS 4
