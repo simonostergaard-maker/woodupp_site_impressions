@@ -157,6 +157,7 @@ select:focus, input:focus { border-color: var(--accent); }
   <div class="tab" data-tab="devices">Device & Search Type</div>
   <div class="tab" data-tab="comparison">Date Comparison</div>
   <div class="tab" data-tab="serp">SERP Features</div>
+  <div class="tab" data-tab="movers">Movers &amp; Shakers</div>
 </div>
 
 <div class="content">
@@ -167,6 +168,7 @@ select:focus, input:focus { border-color: var(--accent); }
       <div class="card"><h3>Daily Impressions by Market</h3><div class="chart-container" id="chart-daily-impressions"></div></div>
       <div class="card"><h3>Daily Clicks by Market</h3><div class="chart-container" id="chart-daily-clicks"></div></div>
     </div>
+    <div class="card" id="card-monthly-trend" style="display:none"><h3>Long-term Monthly Trend <span style="font-size:11px;color:var(--muted);font-weight:400">(faded bars = BigQuery historical data)</span></h3><div class="chart-container tall" id="chart-monthly-trend"></div></div>
     <div class="card"><h3>Market Performance Summary</h3><div class="table-wrap" id="market-summary-table"></div></div>
     <div class="grid-2">
       <div class="card"><h3>Impressions Distribution by Market</h3><div class="chart-container" id="chart-market-pie"></div></div>
@@ -216,6 +218,7 @@ select:focus, input:focus { border-color: var(--accent); }
         <select id="kw-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
       </div>
     </div>
+    <div id="brand-nonbrand-kpis"></div>
     <div class="card"><h3>Top Keywords</h3><div class="table-wrap" id="kw-table"></div></div>
     <div class="card"><h3>Daily Trend for Selected Keyword</h3>
       <select id="kw-trend-select" style="margin-bottom: 10px"><option value="">Select a keyword to see its trend...</option></select>
@@ -275,6 +278,8 @@ select:focus, input:focus { border-color: var(--accent); }
         <select id="comp-preset">
           <option value="last7vs7">Last 7 days vs Previous 7 days</option>
           <option value="last3vs3">Last 3 days vs Previous 3 days</option>
+          <option value="momFull">Last full month vs Previous month</option>
+          <option value="yoy28">Last 28 days vs Same period last year</option>
           <option value="custom">Custom</option>
         </select>
       </div>
@@ -285,6 +290,39 @@ select:focus, input:focus { border-color: var(--accent); }
       <div class="filter-group"><label>&nbsp;</label><button onclick="runComparison()" style="padding:7px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Compare</button></div>
     </div>
     <div id="comp-results"></div>
+  </div>
+
+  <!-- MOVERS & SHAKERS -->
+  <div class="tab-content" id="tab-movers">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="movers-market-filter"><option value="all">All Markets</option></select></div>
+      <div class="filter-group"><label>View</label>
+        <select id="movers-view-filter">
+          <option value="keywords">Keywords</option>
+          <option value="urls">URLs</option>
+          <option value="positions">Positions</option>
+        </select>
+      </div>
+    </div>
+    <div id="movers-period-label" class="card" style="padding:10px 18px;font-size:13px;color:var(--muted);margin-bottom:16px"></div>
+    <div id="movers-keywords-section">
+      <div class="grid-2">
+        <div class="card"><h3>&#x1F4C8; Keyword Winners</h3><div class="table-wrap" id="movers-kw-winners"></div></div>
+        <div class="card"><h3>&#x1F4C9; Keyword Losers</h3><div class="table-wrap" id="movers-kw-losers"></div></div>
+      </div>
+    </div>
+    <div id="movers-urls-section" style="display:none">
+      <div class="grid-2">
+        <div class="card"><h3>&#x1F4C8; URL Winners</h3><div class="table-wrap" id="movers-url-winners"></div></div>
+        <div class="card"><h3>&#x1F4C9; URL Losers</h3><div class="table-wrap" id="movers-url-losers"></div></div>
+      </div>
+    </div>
+    <div id="movers-positions-section" style="display:none">
+      <div class="grid-2">
+        <div class="card"><h3>&#x2B06; Position Gainers</h3><div class="table-wrap" id="movers-pos-gainers"></div></div>
+        <div class="card"><h3>&#x2B07; Position Losers</h3><div class="table-wrap" id="movers-pos-losers"></div></div>
+      </div>
+    </div>
   </div>
 
   <!-- SERP FEATURES -->
@@ -344,6 +382,7 @@ function initApp() {
   renderDomains();
   renderDevices();
   renderSerpFeatures();
+  renderMovers();
   setupComparison();
 }
 
@@ -364,6 +403,8 @@ function populateFilters() {
   });
   const serpSel = document.getElementById('serp-market-filter');
   markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; serpSel.appendChild(o); });
+  const moversSel = document.getElementById('movers-market-filter');
+  markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; moversSel.appendChild(o); });
 }
 
 // ═══════════════════════════════════════════
@@ -417,6 +458,28 @@ function renderOverview() {
 
   // CTR bar
   makeChart('chart-market-ctr', { type:'bar', data:{labels:sorted.map(s=>s[0]),datasets:[{label:'CTR %',data:sorted.map(s=>s[1].avg_ctr),backgroundColor:COLORS}]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>v+'%'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+
+  // Long-term monthly trend
+  if (DATA.monthly_trend && DATA.monthly_trend.months && DATA.monthly_trend.months.length > 0) {
+    document.getElementById('card-monthly-trend').style.display = '';
+    const months = DATA.monthly_trend.months;
+    const allM = DATA.monthly_trend.all_markets;
+    makeChart('chart-monthly-trend', { type:'bar', data:{labels:months, datasets:[
+      { label:'Impressions', data:months.map(m=>allM[m]?.impressions||0),
+        backgroundColor:months.map(m=>allM[m]?.source==='historical'?'#6366f140':'#6366f1'),
+        borderColor:'#6366f1', borderWidth:1, yAxisID:'y' },
+      { label:'Clicks', data:months.map(m=>allM[m]?.clicks||0),
+        backgroundColor:months.map(m=>allM[m]?.source==='historical'?'#22c55e40':'#22c55e'),
+        borderColor:'#22c55e', borderWidth:1, yAxisID:'y1' },
+    ]}, options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}},
+        tooltip:{callbacks:{title:t=>'Month: '+t[0].label}}},
+      scales:{
+        x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},
+        y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'},title:{display:true,text:'Impressions',color:'#6366f1'}},
+        y1:{type:'linear',position:'right',ticks:{color:'#22c55e',callback:v=>fmt(v)},grid:{drawOnChartArea:false},title:{display:true,text:'Clicks',color:'#22c55e'}},
+      }}});
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -556,11 +619,32 @@ document.getElementById('url-trend-select').addEventListener('change', e => {
 // ═══════════════════════════════════════════
 // TAB 4: KEYWORD PERFORMANCE
 // ═══════════════════════════════════════════
+function isBrand(query) {
+  return /woodupp|wood\s*up+/i.test(query);
+}
+
 function renderKeywords() {
   const market = document.getElementById('kw-market-filter').value;
   const search = document.getElementById('kw-search').value.toLowerCase();
   const sortBy = document.getElementById('kw-sort').value;
   let kws = DATA.keyword_performance[market] || [];
+
+  // Brand / Non-brand split
+  const allKws = DATA.keyword_performance['All Markets'] || [];
+  let bImp=0, nbImp=0, bClicks=0, nbClicks=0;
+  allKws.forEach(k => {
+    if (isBrand(k.query)) { bImp += k.impressions; bClicks += k.clicks; }
+    else { nbImp += k.impressions; nbClicks += k.clicks; }
+  });
+  document.getElementById('brand-nonbrand-kpis').innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Brand Impressions</div><div class="value blue">${fmtN(bImp)}</div></div>
+      <div class="kpi"><div class="label">Non-Brand Impressions</div><div class="value cyan">${fmtN(nbImp)}</div></div>
+      <div class="kpi"><div class="label">Brand Clicks</div><div class="value green">${fmtN(bClicks)}</div></div>
+      <div class="kpi"><div class="label">Non-Brand Clicks</div><div class="value green">${fmtN(nbClicks)}</div></div>
+      <div class="kpi"><div class="label">Brand Share (Clicks)</div><div class="value orange">${pct(bClicks, bClicks+nbClicks)}%</div></div>
+      <div class="kpi"><div class="label" style="color:var(--red)">YoY Brand vs Non-Brand</div><div class="value" style="font-size:12px;color:var(--muted);line-height:1.4">No historical keyword data available.<br>Run extract_historical.py with keyword-level data to enable.</div></div>
+    </div>`;
 
   if (search) kws = kws.filter(k => k.query.toLowerCase().includes(search));
   kws = [...kws].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
@@ -796,7 +880,7 @@ function runComparison() {
 
   if (preset === 'last7vs7') {
     periodA = dates.slice(-7);
-    periodB = dates.slice(0, Math.min(6, dates.length));
+    periodB = dates.slice(-14, -7);
     labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
     labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
   } else if (preset === 'last3vs3') {
@@ -804,6 +888,26 @@ function runComparison() {
     periodB = dates.slice(-6, -3);
     labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
     labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
+  } else if (preset === 'momFull') {
+    const lastDate = dates[dates.length - 1];
+    const lastMonth = lastDate.slice(0, 7);
+    const prevMonthDate = new Date(lastMonth + '-01');
+    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+    const prevMonth = prevMonthDate.toISOString().slice(0, 7);
+    periodA = dates.filter(d => d.startsWith(lastMonth));
+    periodB = dates.filter(d => d.startsWith(prevMonth));
+    labelA = `${lastMonth} (${periodA.length} days)`;
+    labelB = `${prevMonth} (${periodB.length} days)`;
+  } else if (preset === 'yoy28') {
+    periodA = dates.slice(-28);
+    const yearAgo = periodA.map(d => { const dt=new Date(d); dt.setFullYear(dt.getFullYear()-1); return dt.toISOString().split('T')[0]; });
+    periodB = yearAgo.filter(d => dm[d]);
+    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
+    labelB = `${yearAgo[0]} to ${yearAgo[yearAgo.length-1]} (YoY)`;
+    if (periodB.length === 0) {
+      document.getElementById('comp-results').innerHTML = '<div class="card" style="color:var(--muted)">No data available for the same period last year. Run <strong>extract_historical.py</strong> to populate historical_data.json.</div>';
+      return;
+    }
   } else {
     const af = document.getElementById('comp-a-from').value;
     const at = document.getElementById('comp-a-to').value;
@@ -913,6 +1017,93 @@ function renderSerpFeatures() {
     document.getElementById('serp-market-table').innerHTML = h;
   });
 }
+
+// ═══════════════════════════════════════════
+// TAB 10: MOVERS & SHAKERS
+// ═══════════════════════════════════════════
+function renderMovers() {
+  const m = DATA.movers;
+  const market = document.getElementById('movers-market-filter').value;
+
+  if (!m || m.insufficient_data) {
+    document.getElementById('movers-period-label').innerHTML = 'Need at least 14 days of data for mover analysis.';
+    return;
+  }
+
+  document.getElementById('movers-period-label').innerHTML =
+    `Comparing <strong>${m.period_recent}</strong> vs <strong>${m.period_prior}</strong> &nbsp;|&nbsp; ${m.split_days}-day periods &nbsp;|&nbsp; Minimum 50 impressions (keywords) / 100 impressions (URLs) in prior period`;
+
+  function filterMarket(items) {
+    return market === 'all' ? items : items.filter(i => i.market === market);
+  }
+
+  function kwTable(items, isWinner) {
+    const rows = filterMarket(items).slice(0, 30);
+    if (!rows.length) return '<p style="color:var(--muted);padding:10px">No data</p>';
+    let h = '<table><thead><tr><th>Keyword</th><th>Market</th><th>Imp (Recent)</th><th>Imp (Prior)</th><th>Change</th><th>% Change</th><th>Pos (Recent)</th><th>Pos Δ</th></tr></thead><tbody>';
+    rows.forEach(k => {
+      const impCls = isWinner ? 'delta up' : 'delta down';
+      const posCls = k.pos_change < 0 ? 'delta up' : 'delta down';
+      h += `<tr>
+        <td>${k.query}</td><td style="color:var(--muted)">${k.market}</td>
+        <td>${fmtN(k.imp_recent)}</td><td>${fmtN(k.imp_prior)}</td>
+        <td><span class="${impCls}">${isWinner?'+':''}${fmtN(k.imp_change)}</span></td>
+        <td><span class="${impCls}">${k.imp_pct > 0 ? '+' : ''}${k.imp_pct}%</span></td>
+        <td>${k.pos_recent||'-'}</td>
+        <td><span class="${posCls}">${k.pos_change > 0 ? '+' : ''}${k.pos_change}</span></td>
+      </tr>`;
+    });
+    return h + '</tbody></table>';
+  }
+
+  function urlTable(items, isWinner) {
+    const rows = filterMarket(items).slice(0, 30);
+    if (!rows.length) return '<p style="color:var(--muted);padding:10px">No data</p>';
+    let h = '<table><thead><tr><th>URL</th><th>Market</th><th>Imp (Recent)</th><th>Imp (Prior)</th><th>Change</th><th>% Change</th></tr></thead><tbody>';
+    rows.forEach(u => {
+      const cls = isWinner ? 'delta up' : 'delta down';
+      h += `<tr>
+        <td class="url-cell" title="${u.url}">${u.path||u.url}</td>
+        <td style="color:var(--muted)">${u.market}</td>
+        <td>${fmtN(u.imp_recent)}</td><td>${fmtN(u.imp_prior)}</td>
+        <td><span class="${cls}">${isWinner?'+':''}${fmtN(u.imp_change)}</span></td>
+        <td><span class="${cls}">${u.imp_pct > 0 ? '+' : ''}${u.imp_pct}%</span></td>
+      </tr>`;
+    });
+    return h + '</tbody></table>';
+  }
+
+  function posTable(items, isGainer) {
+    const rows = filterMarket(items).slice(0, 30);
+    if (!rows.length) return '<p style="color:var(--muted);padding:10px">No data</p>';
+    let h = '<table><thead><tr><th>Keyword</th><th>Market</th><th>Pos (Recent)</th><th>Pos (Prior)</th><th>Pos Δ</th><th>Imp (Recent)</th></tr></thead><tbody>';
+    rows.forEach(k => {
+      const cls = isGainer ? 'delta up' : 'delta down';
+      h += `<tr>
+        <td>${k.query}</td><td style="color:var(--muted)">${k.market}</td>
+        <td>${k.pos_recent}</td><td>${k.pos_prior}</td>
+        <td><span class="${cls}">${k.pos_change > 0 ? '+' : ''}${k.pos_change}</span></td>
+        <td>${fmtN(k.imp_recent)}</td>
+      </tr>`;
+    });
+    return h + '</tbody></table>';
+  }
+
+  document.getElementById('movers-kw-winners').innerHTML = kwTable(m.keyword_winners, true);
+  document.getElementById('movers-kw-losers').innerHTML = kwTable(m.keyword_losers, false);
+  document.getElementById('movers-url-winners').innerHTML = urlTable(m.url_winners, true);
+  document.getElementById('movers-url-losers').innerHTML = urlTable(m.url_losers, false);
+  document.getElementById('movers-pos-gainers').innerHTML = posTable(m.pos_gainers, true);
+  document.getElementById('movers-pos-losers').innerHTML = posTable(m.pos_losers, false);
+}
+
+document.getElementById('movers-market-filter').addEventListener('change', renderMovers);
+document.getElementById('movers-view-filter').addEventListener('change', e => {
+  const v = e.target.value;
+  document.getElementById('movers-keywords-section').style.display = v==='keywords' ? '' : 'none';
+  document.getElementById('movers-urls-section').style.display = v==='urls' ? '' : 'none';
+  document.getElementById('movers-positions-section').style.display = v==='positions' ? '' : 'none';
+});
 
 // ─── Boot ───
 initApp();

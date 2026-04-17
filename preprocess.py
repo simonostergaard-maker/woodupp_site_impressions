@@ -622,6 +622,133 @@ def generate_keyword_daily(df):
     return result
 
 
+# ─── New Analysis Functions ───
+
+def load_historical_monthly():
+    """Load historical_data.json (from extract_historical.py / BigQuery) for long-term trend and YoY."""
+    path = DATA_DIR / "historical_data.json"
+    if not path.exists():
+        print("  historical_data.json not found — long-term trend and YoY unavailable")
+        return None
+    with open(path) as f:
+        data = json.load(f)
+    dates = list(data.get("daily_all_markets", {}).keys())
+    if dates:
+        print(f"  historical_data.json: {min(dates)} to {max(dates)}")
+    return data
+
+
+def generate_monthly_trend(df, historical_monthly=None):
+    """Combined monthly trend: historical BigQuery data + CSV data."""
+    df = df.copy()
+    df["month"] = df["data_date"].str[:7]
+
+    all_csv = df.groupby("month").agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
+    by_mkt_csv = df.groupby(["month","market"]).agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
+
+    all_markets = {}
+    by_market = {}
+
+    if historical_monthly:
+        for month, vals in historical_monthly.get("monthly_all_markets", {}).items():
+            all_markets[month] = {"impressions": vals["impressions"], "clicks": vals["clicks"], "source": "historical"}
+        for mkt, months in historical_monthly.get("monthly_by_market", {}).items():
+            by_market.setdefault(mkt, {})
+            for month, vals in months.items():
+                by_market[mkt][month] = {"impressions": vals["impressions"], "clicks": vals["clicks"], "source": "historical"}
+
+    for _, row in all_csv.iterrows():
+        all_markets[row["month"]] = {"impressions": int(row["impressions"]), "clicks": int(row["clicks"]), "source": "csv"}
+    for _, row in by_mkt_csv.iterrows():
+        by_market.setdefault(row["market"], {})[row["month"]] = {
+            "impressions": int(row["impressions"]), "clicks": int(row["clicks"]), "source": "csv"
+        }
+
+    return {"months": sorted(all_markets.keys()), "all_markets": all_markets, "by_market": by_market}
+
+
+def generate_movers(df):
+    """Identify keyword and URL winners/losers between two equal recent periods."""
+    dates = sorted(df["data_date"].unique())
+    n = len(dates)
+    if n < 14:
+        return {"insufficient_data": True}
+
+    split = min(28, n // 2)
+    recent_dates = set(dates[-split:])
+    prior_dates = set(dates[-split * 2:-split])
+    if not prior_dates:
+        return {"insufficient_data": True}
+
+    period_recent = f"{min(recent_dates)} to {max(recent_dates)}"
+    period_prior = f"{min(prior_dates)} to {max(prior_dates)}"
+
+    kw_df = df[(~df["is_anonymized_query"]) & df["query"].notna() & (df["query"] != "")]
+
+    def agg_kw(date_set):
+        sub = kw_df[kw_df["data_date"].isin(date_set)]
+        agg = sub.groupby(["query", "market"]).agg(
+            impressions=("impressions", "sum"), clicks=("clicks", "sum"), sum_position=("sum_position", "sum"),
+        ).reset_index()
+        agg["avg_position"] = (agg["sum_position"] / agg["impressions"]).round(1)
+        return agg
+
+    kw_r = agg_kw(recent_dates)
+    kw_p = agg_kw(prior_dates)
+    kw_m = kw_r.merge(kw_p, on=["query", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
+    kw_m["imp_change"] = (kw_m["impressions_r"] - kw_m["impressions_p"]).astype(int)
+    kw_m["pos_change"] = (kw_m["avg_position_r"] - kw_m["avg_position_p"]).round(1)
+    kw_sig = kw_m[kw_m["impressions_p"] >= 50]
+
+    def agg_url(date_set):
+        sub = df[df["data_date"].isin(date_set)]
+        agg = sub.groupby(["url", "url_path", "market"]).agg(
+            impressions=("impressions", "sum"), clicks=("clicks", "sum"), sum_position=("sum_position", "sum"),
+        ).reset_index()
+        agg["avg_position"] = (agg["sum_position"] / agg["impressions"]).round(1)
+        return agg
+
+    url_r = agg_url(recent_dates)
+    url_p = agg_url(prior_dates)
+    url_m = url_r.merge(url_p, on=["url", "url_path", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
+    url_m["imp_change"] = (url_m["impressions_r"] - url_m["impressions_p"]).astype(int)
+    url_sig = url_m[url_m["impressions_p"] >= 100]
+
+    def kw_rec(row):
+        return {
+            "query": row["query"], "market": row["market"],
+            "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
+            "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+            "imp_change": int(row["imp_change"]),
+            "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1) if row["impressions_p"] > 0 else 0,
+            "pos_recent": float(row["avg_position_r"]), "pos_prior": float(row["avg_position_p"]),
+            "pos_change": float(row["pos_change"]),
+        }
+
+    def url_rec(row):
+        return {
+            "url": row["url"], "path": row["url_path"], "market": row["market"],
+            "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
+            "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+            "imp_change": int(row["imp_change"]),
+            "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1) if row["impressions_p"] > 0 else 0,
+        }
+
+    pos_sig = kw_sig[(kw_sig["avg_position_p"] > 0) & (kw_sig["avg_position_r"] > 0)]
+
+    return {
+        "period_recent": period_recent,
+        "period_prior": period_prior,
+        "split_days": split,
+        "keyword_winners": [kw_rec(r) for _, r in kw_sig.nlargest(50, "imp_change").iterrows()],
+        "keyword_losers": [kw_rec(r) for _, r in kw_sig.nsmallest(50, "imp_change").iterrows()],
+        "url_winners": [url_rec(r) for _, r in url_sig.nlargest(50, "imp_change").iterrows()],
+        "url_losers": [url_rec(r) for _, r in url_sig.nsmallest(50, "imp_change").iterrows()],
+        "pos_gainers": [kw_rec(r) for _, r in pos_sig.nsmallest(50, "pos_change").iterrows()],
+        "pos_losers": [kw_rec(r) for _, r in pos_sig.nlargest(50, "pos_change").iterrows()],
+    }
+
+
 # ─── Historical Data Loading & Merging ───
 
 def load_historical():
@@ -675,20 +802,21 @@ def merge_nested_date_keyed(new_data, historical_data):
     return merged
 
 
-def merge_with_historical(new_data, historical):
-    """Merge all datasets: CSV data takes precedence, historical fills date gaps."""
-    if not historical:
+def merge_with_historical(new_data, historical, historical_monthly=None):
+    """Merge all datasets: CSV data takes precedence, historical fills date gaps.
+    historical_monthly comes from historical_data.json (BigQuery extract)."""
+    if not historical and not historical_monthly:
         return new_data
 
     merged = {}
 
     # Date-keyed datasets: merge by date (historical fills gaps)
     merged["daily_metrics"] = merge_date_keyed(
-        new_data["daily_metrics"], historical.get("daily_metrics", {}))
+        new_data["daily_metrics"], historical.get("daily_metrics", {}) if historical else {})
 
     # Anonymized: merge by_market_date keys
     merged_anon = dict(new_data["anonymized"])
-    hist_anon = historical.get("anonymized", {})
+    hist_anon = historical.get("anonymized", {}) if historical else {}
     if hist_anon.get("by_market_date"):
         merged_bmd = dict(hist_anon["by_market_date"])
         merged_bmd.update(new_data["anonymized"].get("by_market_date", {}))
@@ -697,7 +825,7 @@ def merge_with_historical(new_data, historical):
 
     # Country data: merge daily
     merged_country = dict(new_data["country_data"])
-    hist_country = historical.get("country_data", {})
+    hist_country = historical.get("country_data", {}) if historical else {}
     if hist_country.get("daily"):
         merged_country["daily"] = merge_date_keyed(
             new_data["country_data"].get("daily", {}), hist_country["daily"])
@@ -705,7 +833,7 @@ def merge_with_historical(new_data, historical):
 
     # Device/search: merge daily_device and daily_search
     merged_ds = dict(new_data["device_search"])
-    hist_ds = historical.get("device_search", {})
+    hist_ds = historical.get("device_search", {}) if historical else {}
     if hist_ds.get("daily_device"):
         merged_ds["daily_device"] = merge_date_keyed(
             new_data["device_search"].get("daily_device", {}), hist_ds["daily_device"])
@@ -716,9 +844,37 @@ def merge_with_historical(new_data, historical):
 
     # URL daily and keyword daily: nested merge
     merged["url_daily"] = merge_nested_date_keyed(
-        new_data["url_daily"], historical.get("url_daily", {}))
+        new_data["url_daily"], historical.get("url_daily", {}) if historical else {})
     merged["keyword_daily"] = merge_nested_date_keyed(
-        new_data["keyword_daily"], historical.get("keyword_daily", {}))
+        new_data["keyword_daily"], historical.get("keyword_daily", {}) if historical else {})
+
+    # Incorporate historical_monthly daily data into daily_metrics (for YoY lookups)
+    if historical_monthly:
+        for date, vals in historical_monthly.get("daily_all_markets", {}).items():
+            if date not in merged["daily_metrics"]:
+                merged["daily_metrics"][date] = {}
+            if "All Markets" not in merged["daily_metrics"][date]:
+                imp = vals["impressions"]
+                clk = vals["clicks"]
+                merged["daily_metrics"][date]["All Markets"] = {
+                    "impressions": imp, "clicks": clk,
+                    "avg_position": 0,
+                    "ctr": round(clk / imp * 100, 2) if imp > 0 else 0,
+                    "total_rows": 0, "anon_queries": 0, "anon_pct": 0,
+                }
+        for market_name, dates_data in historical_monthly.get("daily_by_market", {}).items():
+            for date, vals in dates_data.items():
+                if date not in merged["daily_metrics"]:
+                    merged["daily_metrics"][date] = {}
+                if market_name not in merged["daily_metrics"][date]:
+                    imp = vals["impressions"]
+                    clk = vals["clicks"]
+                    merged["daily_metrics"][date][market_name] = {
+                        "impressions": imp, "clicks": clk,
+                        "avg_position": 0,
+                        "ctr": round(clk / imp * 100, 2) if imp > 0 else 0,
+                        "total_rows": 0, "anon_queries": 0, "anon_pct": 0,
+                    }
 
     # Update overview dates from merged daily_metrics
     merged["overview"] = dict(new_data["overview"])
@@ -745,10 +901,12 @@ def generate_html(all_data):
         "overview", "daily_metrics", "anonymized", "url_performance",
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
+        "movers", "monthly_trend",
     ]
     lines = []
     for key in data_keys:
-        lines.append(f"DATA['{key}'] = {json.dumps(all_data[key], ensure_ascii=False)};")
+        if key in all_data:
+            lines.append(f"DATA['{key}'] = {json.dumps(all_data[key], ensure_ascii=False)};")
     injection = "\n".join(lines)
 
     # Replace the placeholder
@@ -774,9 +932,13 @@ def main():
     else:
         csv_path = DEFAULT_CSV
 
-    # Load historical data
+    # Load historical data (frozen JSON baseline)
     print("Loading historical data...")
     historical = load_historical()
+
+    # Load long-term BigQuery history (historical_data.json)
+    print("Loading historical monthly data...")
+    historical_monthly = load_historical_monthly()
 
     # Process CSV if available
     if csv_path.exists():
@@ -798,10 +960,23 @@ def main():
 
         # Merge with historical
         print("\nMerging with historical data...")
-        all_data = merge_with_historical(new_data, historical)
+        all_data = merge_with_historical(new_data, historical, historical_monthly)
+
+        # Movers & Shakers analysis
+        print("Generating movers analysis...")
+        all_data["movers"] = generate_movers(df)
+
+        # Long-term monthly trend
+        print("Generating monthly trend...")
+        all_data["monthly_trend"] = generate_monthly_trend(df, historical_monthly)
+
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
         all_data = historical
+        all_data["movers"] = {"insufficient_data": True}
+        all_data["monthly_trend"] = generate_monthly_trend(
+            pd.DataFrame(), historical_monthly
+        ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)
