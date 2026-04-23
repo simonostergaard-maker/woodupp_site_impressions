@@ -163,6 +163,19 @@ select:focus, input:focus { border-color: var(--accent); }
 <div class="content">
   <!-- DASHBOARD OVERVIEW -->
   <div class="tab-content active" id="tab-overview">
+    <div class="filters" style="margin-bottom:12px">
+      <div class="filter-group"><label>Compare</label>
+        <select id="overview-preset">
+          <option value="mtdYoY">Month-to-date vs Same period last year</option>
+          <option value="mtdMoM">Month-to-date vs Same period last month</option>
+          <option value="last7vs7">Last 7 days vs Previous 7 days</option>
+          <option value="last28vs28">Last 28 days vs Previous 28 days</option>
+          <option value="yoy28">Last 28 days vs Same period last year</option>
+          <option value="momFull">Last full month vs Previous month</option>
+        </select>
+      </div>
+    </div>
+    <div id="overview-comparison"></div>
     <div id="overview-kpis"></div>
     <div class="grid-2">
       <div class="card"><h3>Daily Impressions by Market</h3><div class="chart-container" id="chart-daily-impressions"></div></div>
@@ -424,6 +437,10 @@ function renderOverview() {
       <div class="kpi"><div class="label">Markets</div><div class="value">${DATA.overview.markets.length}</div></div>
     </div>`;
 
+  // Overview comparison
+  document.getElementById('overview-preset').addEventListener('change', renderOverviewComparison);
+  renderOverviewComparison();
+
   // Daily impressions/clicks charts
   const dates = DATA.overview.dates;
   const dm = DATA.daily_metrics;
@@ -480,6 +497,136 @@ function renderOverview() {
         y1:{type:'linear',position:'right',ticks:{color:'#22c55e',callback:v=>fmt(v)},grid:{drawOnChartArea:false},title:{display:true,text:'Clicks',color:'#22c55e'}},
       }}});
   }
+}
+
+function renderOverviewComparison() {
+  const preset = document.getElementById('overview-preset').value;
+  const allDates = Object.keys(DATA.daily_metrics).sort();
+  const dm = DATA.daily_metrics;
+  let periodA, periodB, labelA, labelB;
+
+  if (preset === 'mtdYoY') {
+    const lastDate = allDates[allDates.length - 1];
+    const monthPrefix = lastDate.slice(0, 7);
+    const day = parseInt(lastDate.slice(8, 10));
+    periodA = allDates.filter(d => d.startsWith(monthPrefix));
+    const lastDt = new Date(lastDate);
+    const lyYear = lastDt.getFullYear() - 1;
+    const lyMonth = String(lastDt.getMonth() + 1).padStart(2, '0');
+    const lyPrefix = lyYear + '-' + lyMonth;
+    const lyEnd = lyPrefix + '-' + String(day).padStart(2, '0');
+    periodB = allDates.filter(d => d.startsWith(lyPrefix) && d <= lyEnd);
+    labelA = `${monthPrefix}-01 to ${lastDate}`;
+    labelB = `${lyPrefix}-01 to ${lyEnd} (YoY)`;
+  } else if (preset === 'mtdMoM') {
+    const lastDate = allDates[allDates.length - 1];
+    const monthPrefix = lastDate.slice(0, 7);
+    const day = parseInt(lastDate.slice(8, 10));
+    periodA = allDates.filter(d => d.startsWith(monthPrefix));
+    const lastDt = new Date(lastDate);
+    const pmDate = new Date(lastDt.getFullYear(), lastDt.getMonth() - 1, 1);
+    const pmPrefix = pmDate.toISOString().slice(0, 7);
+    const pmEnd = pmPrefix + '-' + String(day).padStart(2, '0');
+    periodB = allDates.filter(d => d.startsWith(pmPrefix) && d <= pmEnd);
+    labelA = `${monthPrefix}-01 to ${lastDate}`;
+    labelB = `${pmPrefix}-01 to ${pmEnd} (MoM)`;
+  } else if (preset === 'last7vs7') {
+    periodA = allDates.slice(-7);
+    periodB = allDates.slice(-14, -7);
+    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
+    labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
+  } else if (preset === 'last28vs28') {
+    periodA = allDates.slice(-28);
+    periodB = allDates.slice(-56, -28);
+    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
+    labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
+  } else if (preset === 'yoy28') {
+    periodA = allDates.slice(-28);
+    const yearAgo = periodA.map(d => { const dt=new Date(d); dt.setFullYear(dt.getFullYear()-1); return dt.toISOString().split('T')[0]; });
+    periodB = yearAgo.filter(d => dm[d]);
+    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
+    labelB = `${yearAgo[0]} to ${yearAgo[yearAgo.length-1]} (YoY)`;
+  } else if (preset === 'momFull') {
+    const lastDate = allDates[allDates.length - 1];
+    const lastMonth = lastDate.slice(0, 7);
+    const prevMonthDate = new Date(lastMonth + '-01');
+    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+    const prevMonth = prevMonthDate.toISOString().slice(0, 7);
+    periodA = allDates.filter(d => d.startsWith(lastMonth));
+    periodB = allDates.filter(d => d.startsWith(prevMonth));
+    labelA = `${lastMonth} (${periodA.length} days)`;
+    labelB = `${prevMonth} (${periodB.length} days)`;
+  }
+
+  if (!periodA || periodA.length === 0) {
+    document.getElementById('overview-comparison').innerHTML = '';
+    return;
+  }
+
+  const markets = Object.keys(DATA.overview.per_market);
+
+  function aggPeriod(period) {
+    const result = {total:{impressions:0,clicks:0,sum_pos:0,rows:0}, markets:{}};
+    period.forEach(d => {
+      if(!dm[d]) return;
+      const all = dm[d]['All Markets'];
+      if(all) { result.total.impressions+=all.impressions; result.total.clicks+=all.clicks; result.total.rows+=all.total_rows; }
+      markets.forEach(m => {
+        if(!dm[d][m]) return;
+        if(!result.markets[m]) result.markets[m]={impressions:0,clicks:0};
+        result.markets[m].impressions += dm[d][m].impressions;
+        result.markets[m].clicks += dm[d][m].clicks;
+      });
+    });
+    result.total.ctr = result.total.impressions>0 ? +(result.total.clicks/result.total.impressions*100).toFixed(2) : 0;
+    return result;
+  }
+
+  const a = aggPeriod(periodA);
+  const b = aggPeriod(periodB);
+
+  function deltaHtml(va,vb,invert) {
+    if(vb===0) return '<span class="delta" style="color:var(--muted)">N/A</span>';
+    const d = ((va-vb)/vb*100).toFixed(1);
+    const cls = invert ? (d<0?'up':'down') : (d>0?'up':'down');
+    return `<span class="delta ${cls}">${d>0?'+':''}${d}%</span>`;
+  }
+
+  const noData = periodB.length === 0;
+
+  let html = `<div class="comparison-row" style="margin-bottom:16px">
+    <div class="comp-card">
+      <h4>${labelA} (${periodA.length} days)</h4>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(a.total.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(a.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${a.total.ctr}%</span></div>
+    </div>
+    <div class="vs-badge">VS</div>
+    <div class="comp-card">
+      <h4>${labelB} (${noData ? 0 : periodB.length} days)</h4>`;
+
+  if (noData) {
+    html += `<div style="color:var(--muted);padding:12px 0">No comparison data available for this period.</div>`;
+  } else {
+    html += `
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(b.total.impressions)} ${deltaHtml(a.total.impressions,b.total.impressions)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(b.total.clicks)} ${deltaHtml(a.total.clicks,b.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${b.total.ctr}% ${deltaHtml(a.total.ctr,b.total.ctr)}</span></div>`;
+  }
+  html += `</div></div>`;
+
+  if (!noData) {
+    html += '<div class="card" style="margin-bottom:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Imp (Current)</th><th>Imp (Compare)</th><th>Change</th><th>Clicks (Current)</th><th>Clicks (Compare)</th><th>Change</th></tr></thead><tbody>';
+    const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.impressions||0) - (a.markets[x]?.impressions||0));
+    sortedMarkets.forEach(m => {
+      const ma = a.markets[m] || {impressions:0,clicks:0};
+      const mb = b.markets[m] || {impressions:0,clicks:0};
+      html += `<tr><td>${m}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td></tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  }
+
+  document.getElementById('overview-comparison').innerHTML = html;
 }
 
 // ═══════════════════════════════════════════
