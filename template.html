@@ -329,6 +329,21 @@ select:focus, input:focus { border-color: var(--accent); }
     </div>
     <div class="card"><h3>Daily Organic Sessions (Last 90 Days)</h3><div class="chart-container tall" id="chart-ga4-daily"></div></div>
     <div class="card"><h3>Market Performance (Organic Search)</h3><div class="table-wrap" id="ga4-market-table"></div></div>
+    <div class="card">
+      <h3>Event Performance</h3>
+      <div class="filters" style="margin-bottom:16px">
+        <div class="filter-group"><label>Compare</label>
+          <select id="ga4-event-compare">
+            <option value="1">Last month vs Previous month</option>
+            <option value="3">Last 3 months vs Previous 3 months</option>
+            <option value="6" selected>Last 6 months vs Previous 6 months</option>
+            <option value="12">Last 12 months vs Previous 12 months</option>
+            <option value="0">All time</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap" id="ga4-event-table"></div>
+    </div>
   </div>
 
   <!-- MOVERS & SHAKERS -->
@@ -427,6 +442,7 @@ function initApp() {
   renderAnalytics();
   document.getElementById('ga4-market-filter').addEventListener('change', renderAnalytics);
   document.getElementById('ga4-period-filter').addEventListener('change', renderAnalytics);
+  document.getElementById('ga4-event-compare').addEventListener('change', renderEventTable);
 }
 
 function populateFilters() {
@@ -1389,17 +1405,27 @@ function renderAnalytics() {
     {label:'Conversions', data:filteredMonths.map(m=>(mData[m]?.conversions||0)), borderColor:'#ef4444', backgroundColor:'#ef444420', tension:0.3, borderWidth:2, pointRadius:3, fill:true},
   ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}}}}});
 
-  // Funnel chart
+  // Funnel chart — works with new ga4.events or legacy ga4.funnel
   function getFunnel(m) {
-    const events = ['view_item','add_to_cart','begin_checkout','purchase'];
+    const funnelKeys = ['view_item','add_to_cart','begin_checkout','purchase'];
     const labels = ['View Item','Add to Cart','Begin Checkout','Purchase'];
-    const totals = events.map(() => 0);
-    const fData = m === 'All Markets' ? ga4.funnel : {[m]: ga4.funnel[m] || {}};
-    filteredMonths.forEach(mo => {
-      Object.keys(fData).forEach(mkt => {
-        events.forEach((ev,i) => { totals[i] += fData[mkt]?.[mo]?.[ev]?.events || 0; });
+    const totals = funnelKeys.map(() => 0);
+    const mkts = m === 'All Markets'
+      ? Object.keys(ga4.events || ga4.funnel || {})
+      : [m];
+    if (ga4.events) {
+      mkts.forEach(mkt => {
+        filteredMonths.forEach(mo => {
+          funnelKeys.forEach((ev,i) => { totals[i] += ga4.events[mkt]?.[mo]?.[ev] || 0; });
+        });
       });
-    });
+    } else if (ga4.funnel) {
+      mkts.forEach(mkt => {
+        filteredMonths.forEach(mo => {
+          funnelKeys.forEach((ev,i) => { totals[i] += ga4.funnel[mkt]?.[mo]?.[ev]?.events || 0; });
+        });
+      });
+    }
     return {labels, totals};
   }
   const fn = getFunnel(market);
@@ -1447,6 +1473,69 @@ function renderAnalytics() {
   });
   tbl += '</tbody></table>';
   document.getElementById('ga4-market-table').innerHTML = tbl;
+
+  renderEventTable();
+}
+
+function renderEventTable() {
+  const el = document.getElementById('ga4-event-table');
+  if (!el) return;
+  const ga4 = DATA.ga4;
+  if (!ga4 || !ga4.events) {
+    el.innerHTML = '<p style="color:var(--muted);padding:10px">Event data not available. Re-run extract_ga4.py then preprocess.py.</p>';
+    return;
+  }
+
+  const market = document.getElementById('ga4-market-filter').value;
+  const nMonths = parseInt(document.getElementById('ga4-event-compare').value);
+  const allMonths = ga4.months;
+
+  const periodA = nMonths > 0 ? allMonths.slice(-nMonths) : allMonths;
+  const periodB = nMonths > 0 && allMonths.length > nMonths ? allMonths.slice(-nMonths*2, -nMonths) : [];
+
+  function aggEvents(period) {
+    const result = {};
+    const mkts = market === 'All Markets' ? Object.keys(ga4.events) : [market];
+    mkts.forEach(mkt => {
+      period.forEach(mo => {
+        Object.entries(ga4.events[mkt]?.[mo] || {}).forEach(([ev, cnt]) => {
+          result[ev] = (result[ev] || 0) + cnt;
+        });
+      });
+    });
+    return result;
+  }
+
+  const evA = aggEvents(periodA);
+  const evB = periodB.length > 0 ? aggEvents(periodB) : null;
+
+  const sortedEvents = Object.keys(evA).sort((a,b) => (evA[b]||0) - (evA[a]||0));
+
+  const labelA = nMonths > 0 ? `Last ${nMonths}m` : 'All time';
+  const labelB = nMonths > 0 ? `Prev ${nMonths}m` : '';
+
+  let h = `<table><thead><tr><th>Event</th><th>${labelA}</th>`;
+  if (evB) h += `<th>${labelB}</th><th>Change</th>`;
+  h += '</tr></thead><tbody>';
+
+  sortedEvents.forEach(ev => {
+    const va = evA[ev] || 0;
+    const vb = evB ? (evB[ev] || 0) : null;
+    h += `<tr><td style="font-family:monospace;font-size:12px">${ev}</td><td>${fmtN(va)}</td>`;
+    if (evB !== null) {
+      h += `<td>${fmtN(vb)}</td>`;
+      if (vb > 0) {
+        const d = ((va - vb) / vb * 100).toFixed(1);
+        const cls = d > 0 ? 'up' : 'down';
+        h += `<td><span class="delta ${cls}">${d > 0 ? '+' : ''}${d}%</span></td>`;
+      } else {
+        h += `<td><span class="delta" style="color:var(--muted)">N/A</span></td>`;
+      }
+    }
+    h += '</tr>';
+  });
+  h += '</tbody></table>';
+  el.innerHTML = h;
 }
 
 // ─── Boot ───

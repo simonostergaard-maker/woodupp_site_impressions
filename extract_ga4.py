@@ -67,31 +67,28 @@ def main():
         }
     print(f"  {len(monthly)} markets, {sum(len(v) for v in monthly.values())} month-market rows")
 
-    print("Querying ecommerce funnel events (monthly)...")
-    funnel_q = """
+    print("Querying all events (monthly)...")
+    events_q = """
         SELECT
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
             event_name,
-            SUM(CAST(event_count AS INT64)) AS events,
-            ROUND(SUM(CAST(event_value AS FLOAT64)), 2) AS value
+            SUM(CAST(event_count AS INT64)) AS events
         FROM `obsidian-375910.woodupp.ga4_events`
-        WHERE event_name IN ('view_item', 'add_to_cart', 'begin_checkout', 'purchase')
         GROUP BY account_name, month, event_name
         ORDER BY account_name, month, event_name
     """
-    funnel = {}
-    for row in client.query(funnel_q):
+    events = {}
+    event_names = set()
+    for row in client.query(events_q):
         market = ACCOUNT_MAP.get(row.account_name)
         if not market:
             continue
-        funnel.setdefault(market, {})
-        funnel[market].setdefault(row.month, {})
-        funnel[market][row.month][row.event_name] = {
-            "events": row.events,
-            "value": float(row.value),
-        }
-    print(f"  {len(funnel)} markets with funnel data")
+        events.setdefault(market, {})
+        events[market].setdefault(row.month, {})
+        events[market][row.month][row.event_name] = row.events
+        event_names.add(row.event_name)
+    print(f"  {len(events)} markets, {len(event_names)} distinct events")
 
     print("Querying daily sessions (last 90 days)...")
     daily_q = """
@@ -134,7 +131,8 @@ def main():
 
     ga4_data = {
         "monthly": monthly,
-        "funnel": funnel,
+        "events": events,
+        "event_names": sorted(event_names),
         "daily": daily,
         "months": all_months,
         "date_range": {
