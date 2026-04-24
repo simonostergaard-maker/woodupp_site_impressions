@@ -657,9 +657,9 @@ function renderOverviewComparison() {
       markets.forEach(m => {
         const md = day[m];
         if (!md) return;
-        if (!result[m]) result[m] = {sessions:0, conversions:0};
-        result[m].sessions += md.s || 0;
+        if (!result[m]) result[m] = {conversions:0, revenue:0};
         result[m].conversions += md.c || 0;
+        result[m].revenue += md.r || 0;
       });
     });
     return result;
@@ -668,9 +668,15 @@ function renderOverviewComparison() {
   const hasGA4 = !!DATA.ga4_agg;
   const ga4A = aggGA4Period(periodA);
   const ga4B = aggGA4Period(periodB);
+  const currencies = DATA.ga4_agg?.currencies || {};
+
+  function fmtRev(val, market) {
+    const cur = currencies[market] || '';
+    return cur ? `${cur} ${fmtN(Math.round(val))}` : fmtN(Math.round(val));
+  }
 
   if (!noData) {
-    const ga4Heads = hasGA4 ? '<th>Sessions (Cur)</th><th>Sessions (Comp)</th><th>Change</th><th>Conv (Cur)</th><th>Conv (Comp)</th><th>Change</th>' : '';
+    const ga4Heads = hasGA4 ? '<th>Conv (Cur)</th><th>Conv (Comp)</th><th>Change</th><th>Revenue (Cur)</th><th>Revenue (Comp)</th><th>Change</th>' : '';
     html += `<div class="card" style="margin-bottom:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Imp (Current)</th><th>Imp (Compare)</th><th>Change</th><th>Clicks (Current)</th><th>Clicks (Compare)</th><th>Change</th>${ga4Heads}</tr></thead><tbody>`;
     const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.impressions||0) - (a.markets[x]?.impressions||0));
     sortedMarkets.forEach(m => {
@@ -678,9 +684,9 @@ function renderOverviewComparison() {
       const mb = b.markets[m] || {impressions:0,clicks:0};
       let row = `<tr><td>${m}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td>`;
       if (hasGA4) {
-        const g4a = ga4A[m] || {sessions:0,conversions:0};
-        const g4b = ga4B[m] || {sessions:0,conversions:0};
-        row += `<td>${fmtN(g4a.sessions)}</td><td>${fmtN(g4b.sessions)}</td><td>${deltaHtml(g4a.sessions,g4b.sessions)}</td><td>${fmtN(g4a.conversions)}</td><td>${fmtN(g4b.conversions)}</td><td>${deltaHtml(g4a.conversions,g4b.conversions)}</td>`;
+        const g4a = ga4A[m] || {conversions:0,revenue:0};
+        const g4b = ga4B[m] || {conversions:0,revenue:0};
+        row += `<td>${fmtN(g4a.conversions)}</td><td>${fmtN(g4b.conversions)}</td><td>${deltaHtml(g4a.conversions,g4b.conversions)}</td><td>${fmtRev(g4a.revenue,m)}</td><td>${fmtRev(g4b.revenue,m)}</td><td>${deltaHtml(g4a.revenue,g4b.revenue)}</td>`;
       }
       html += row + '</tr>';
     });
