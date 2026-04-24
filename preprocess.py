@@ -638,6 +638,18 @@ def load_historical_monthly():
     return data
 
 
+def load_ga4_data():
+    """Load GA4 analytics data (from BigQuery ga4/ga4_events tables)."""
+    path = DATA_DIR / "ga4_data.json"
+    if not path.exists():
+        print("  ga4_data.json not found — Analytics tab unavailable")
+        return None
+    with open(path) as f:
+        data = json.load(f)
+    print(f"  ga4_data.json: {len(data.get('months',[]))} months, {len(data.get('daily',{}))} daily dates")
+    return data
+
+
 def generate_monthly_trend(df, historical_monthly=None):
     """Combined monthly trend: historical BigQuery data + CSV data."""
     df = df.copy()
@@ -901,7 +913,7 @@ def generate_html(all_data):
         "overview", "daily_metrics", "anonymized", "url_performance",
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
-        "movers", "monthly_trend",
+        "movers", "monthly_trend", "ga4",
     ]
     lines = []
     for key in data_keys:
@@ -940,6 +952,10 @@ def main():
     print("Loading historical monthly data...")
     historical_monthly = load_historical_monthly()
 
+    # Load GA4 analytics data
+    print("Loading GA4 analytics data...")
+    ga4_data = load_ga4_data()
+
     # Process CSV if available
     if csv_path.exists():
         df = load_and_clean(csv_path)
@@ -970,6 +986,10 @@ def main():
         print("Generating monthly trend...")
         all_data["monthly_trend"] = generate_monthly_trend(df, historical_monthly)
 
+        # GA4 analytics
+        if ga4_data:
+            all_data["ga4"] = ga4_data
+
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
         all_data = historical
@@ -977,6 +997,8 @@ def main():
         all_data["monthly_trend"] = generate_monthly_trend(
             pd.DataFrame(), historical_monthly
         ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
+        if ga4_data:
+            all_data["ga4"] = ga4_data
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)
