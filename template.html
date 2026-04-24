@@ -155,6 +155,7 @@ select:focus, input:focus { border-color: var(--accent); }
   <div class="tab" data-tab="countries">Country Overview</div>
   <div class="tab" data-tab="domains">Domain Comparison</div>
   <div class="tab" data-tab="devices">Device & Search Type</div>
+  <div class="tab" data-tab="analytics">Analytics</div>
   <div class="tab" data-tab="comparison">Date Comparison</div>
   <div class="tab" data-tab="serp">SERP Features</div>
   <div class="tab" data-tab="movers">Movers &amp; Shakers</div>
@@ -305,6 +306,31 @@ select:focus, input:focus { border-color: var(--accent); }
     <div id="comp-results"></div>
   </div>
 
+  <!-- ANALYTICS (GA4) -->
+  <div class="tab-content" id="tab-analytics">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="ga4-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Period</label>
+        <select id="ga4-period-filter">
+          <option value="6">Last 6 months</option>
+          <option value="12" selected>Last 12 months</option>
+          <option value="0">All time</option>
+        </select>
+      </div>
+    </div>
+    <div id="ga4-kpis"></div>
+    <div class="grid-2">
+      <div class="card"><h3>Organic Sessions &amp; Users (Monthly)</h3><div class="chart-container" id="chart-ga4-sessions"></div></div>
+      <div class="card"><h3>Revenue from Organic Search (Monthly)</h3><div class="chart-container" id="chart-ga4-revenue"></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Conversions (Monthly)</h3><div class="chart-container" id="chart-ga4-conversions"></div></div>
+      <div class="card"><h3>Ecommerce Funnel (Selected Period)</h3><div class="chart-container" id="chart-ga4-funnel"></div></div>
+    </div>
+    <div class="card"><h3>Daily Organic Sessions (Last 90 Days)</h3><div class="chart-container tall" id="chart-ga4-daily"></div></div>
+    <div class="card"><h3>Market Performance (Organic Search)</h3><div class="table-wrap" id="ga4-market-table"></div></div>
+  </div>
+
   <!-- MOVERS & SHAKERS -->
   <div class="tab-content" id="tab-movers">
     <div class="filters">
@@ -360,6 +386,7 @@ function fmt(n) { return n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ?
 function fmtN(n) { return n.toLocaleString(); }
 function pct(a,b) { return b > 0 ? (a/b*100).toFixed(1) : '0.0'; }
 function delta(a,b) { if(b===0) return {val:0,cls:''}; const d=((a-b)/b*100).toFixed(1); return {val:d, cls: d>0?'up':'down', sign: d>0?'+':''}; }
+function fmtCurrency(n) { return n >= 1000000 ? '$'+( n/1000000).toFixed(1)+'M' : n >= 1000 ? '$'+(n/1000).toFixed(1)+'K' : '$'+n.toFixed(0); }
 
 function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
@@ -397,6 +424,9 @@ function initApp() {
   renderSerpFeatures();
   renderMovers();
   setupComparison();
+  renderAnalytics();
+  document.getElementById('ga4-market-filter').addEventListener('change', renderAnalytics);
+  document.getElementById('ga4-period-filter').addEventListener('change', renderAnalytics);
 }
 
 function populateFilters() {
@@ -418,6 +448,8 @@ function populateFilters() {
   markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; serpSel.appendChild(o); });
   const moversSel = document.getElementById('movers-market-filter');
   markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; moversSel.appendChild(o); });
+  const ga4Sel = document.getElementById('ga4-market-filter');
+  if (ga4Sel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; ga4Sel.appendChild(o); }); }
 }
 
 // ═══════════════════════════════════════════
@@ -1251,6 +1283,136 @@ document.getElementById('movers-view-filter').addEventListener('change', e => {
   document.getElementById('movers-urls-section').style.display = v==='urls' ? '' : 'none';
   document.getElementById('movers-positions-section').style.display = v==='positions' ? '' : 'none';
 });
+
+// ═══════════════════════════════════════════
+// TAB: ANALYTICS (GA4)
+// ═══════════════════════════════════════════
+function renderAnalytics() {
+  if (!DATA.ga4) {
+    document.getElementById('ga4-kpis').innerHTML = '<div class="card" style="color:var(--muted)">GA4 data not available. Run extract_ga4.py to populate ga4_data.json.</div>';
+    return;
+  }
+
+  const market = document.getElementById('ga4-market-filter').value;
+  const periodMonths = parseInt(document.getElementById('ga4-period-filter').value);
+  const ga4 = DATA.ga4;
+  let months = ga4.months;
+
+  if (periodMonths > 0) {
+    months = months.slice(-periodMonths);
+  }
+
+  // Get monthly data for selected market or all
+  function getMonthly(m) {
+    if (m === 'All Markets') {
+      const result = {};
+      months.forEach(mo => {
+        result[mo] = {sessions:0, users:0, conversions:0, revenue:0};
+        Object.keys(ga4.monthly).forEach(mkt => {
+          const d = ga4.monthly[mkt]?.[mo];
+          if (d) { result[mo].sessions+=d.sessions; result[mo].users+=d.users; result[mo].conversions+=d.conversions; result[mo].revenue+=d.revenue; }
+        });
+      });
+      return result;
+    }
+    return ga4.monthly[m] || {};
+  }
+
+  const mData = getMonthly(market);
+  const filteredMonths = months.filter(m => mData[m]);
+
+  // KPIs: totals for selected period
+  let totalSessions=0, totalUsers=0, totalConversions=0, totalRevenue=0;
+  filteredMonths.forEach(m => {
+    const d = mData[m];
+    if (d) { totalSessions+=d.sessions; totalUsers+=d.users; totalConversions+=d.conversions; totalRevenue+=d.revenue; }
+  });
+  const convRate = totalSessions > 0 ? (totalConversions/totalSessions*100).toFixed(2) : '0.00';
+
+  document.getElementById('ga4-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">Organic Sessions</div><div class="value blue">${fmtN(totalSessions)}</div></div>
+      <div class="kpi"><div class="label">Organic Users</div><div class="value green">${fmtN(totalUsers)}</div></div>
+      <div class="kpi"><div class="label">Conversions</div><div class="value orange">${fmtN(totalConversions)}</div></div>
+      <div class="kpi"><div class="label">Revenue</div><div class="value purple">${fmtCurrency(totalRevenue)}</div></div>
+      <div class="kpi"><div class="label">Conversion Rate</div><div class="value cyan">${convRate}%</div></div>
+    </div>`;
+
+  // Sessions & Users chart
+  makeChart('chart-ga4-sessions', { type:'bar', data:{labels:filteredMonths, datasets:[
+    {label:'Sessions', data:filteredMonths.map(m=>(mData[m]?.sessions||0)), backgroundColor:'#6366f180', borderColor:'#6366f1', borderWidth:1, yAxisID:'y'},
+    {label:'Users', data:filteredMonths.map(m=>(mData[m]?.users||0)), type:'line', borderColor:'#22c55e', backgroundColor:'#22c55e20', tension:0.3, borderWidth:2, pointRadius:3, yAxisID:'y'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Revenue chart
+  makeChart('chart-ga4-revenue', { type:'bar', data:{labels:filteredMonths, datasets:[
+    {label:'Revenue', data:filteredMonths.map(m=>(mData[m]?.revenue||0)), backgroundColor:'#f59e0b80', borderColor:'#f59e0b', borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmtCurrency(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Conversions chart
+  makeChart('chart-ga4-conversions', { type:'line', data:{labels:filteredMonths, datasets:[
+    {label:'Conversions', data:filteredMonths.map(m=>(mData[m]?.conversions||0)), borderColor:'#ef4444', backgroundColor:'#ef444420', tension:0.3, borderWidth:2, pointRadius:3, fill:true},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}}}}});
+
+  // Funnel chart
+  function getFunnel(m) {
+    const events = ['view_item','add_to_cart','begin_checkout','purchase'];
+    const labels = ['View Item','Add to Cart','Begin Checkout','Purchase'];
+    const totals = events.map(() => 0);
+    const fData = m === 'All Markets' ? ga4.funnel : {[m]: ga4.funnel[m] || {}};
+    filteredMonths.forEach(mo => {
+      Object.keys(fData).forEach(mkt => {
+        events.forEach((ev,i) => { totals[i] += fData[mkt]?.[mo]?.[ev]?.events || 0; });
+      });
+    });
+    return {labels, totals};
+  }
+  const fn = getFunnel(market);
+  const funnelColors = ['#3b82f6','#f59e0b','#ef4444','#22c55e'];
+  makeChart('chart-ga4-funnel', { type:'bar', data:{labels:fn.labels, datasets:[
+    {label:'Events', data:fn.totals, backgroundColor:funnelColors.map(c=>c+'80'), borderColor:funnelColors, borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y.toLocaleString()} events`}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{display:false}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  // Daily sessions chart (last 90 days)
+  const dailyDates = Object.keys(ga4.daily).sort();
+  const dailySessions = dailyDates.map(d => {
+    if (market === 'All Markets') return ga4.daily[d]?.['All Markets']?.sessions || 0;
+    return ga4.daily[d]?.[market]?.sessions || 0;
+  });
+  const dailyConv = dailyDates.map(d => {
+    if (market === 'All Markets') return ga4.daily[d]?.['All Markets']?.conversions || 0;
+    return ga4.daily[d]?.[market]?.conversions || 0;
+  });
+  makeChart('chart-ga4-daily', { type:'line', data:{labels:dailyDates.map(d=>d.slice(5)), datasets:[
+    {label:'Sessions', data:dailySessions, borderColor:'#6366f1', backgroundColor:'#6366f120', tension:0.3, borderWidth:2, pointRadius:1, fill:true, yAxisID:'y'},
+    {label:'Conversions', data:dailyConv, borderColor:'#22c55e', backgroundColor:'#22c55e20', tension:0.3, borderWidth:2, pointRadius:1, fill:true, yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3',maxTicksLimit:15},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'},title:{display:true,text:'Sessions',color:'#6366f1'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false},title:{display:true,text:'Conversions',color:'#22c55e'}}}}});
+
+  // Market performance table
+  const latestMonth = months[months.length-1] || '';
+  const prevMonth = months.length >= 2 ? months[months.length-2] : '';
+  const marketNames = Object.keys(ga4.monthly).sort((a,b) => {
+    const ra = ga4.monthly[b]?.[latestMonth]?.revenue || 0;
+    const rb = ga4.monthly[a]?.[latestMonth]?.revenue || 0;
+    return ra - rb;
+  });
+
+  let tbl = '<table><thead><tr><th>Market</th><th>Sessions</th><th>Users</th><th>Conversions</th><th>Conv Rate</th><th>Revenue</th><th>vs Prev Month</th></tr></thead><tbody>';
+  marketNames.forEach(m => {
+    const curr = ga4.monthly[m]?.[latestMonth] || {sessions:0,users:0,conversions:0,revenue:0};
+    const prev = ga4.monthly[m]?.[prevMonth] || {sessions:0,users:0,conversions:0,revenue:0};
+    const cr = curr.sessions > 0 ? (curr.conversions/curr.sessions*100).toFixed(1) : '0.0';
+    let revDelta = '';
+    if (prev.revenue > 0) {
+      const d = ((curr.revenue-prev.revenue)/prev.revenue*100).toFixed(1);
+      const cls = d > 0 ? 'up' : 'down';
+      revDelta = `<span class="delta ${cls}">${d>0?'+':''}${d}%</span>`;
+    }
+    tbl += `<tr><td>${m}</td><td>${fmtN(curr.sessions)}</td><td>${fmtN(curr.users)}</td><td>${fmtN(curr.conversions)}</td><td>${cr}%</td><td>${fmtCurrency(curr.revenue)}</td><td>${revDelta}</td></tr>`;
+  });
+  tbl += '</tbody></table>';
+  document.getElementById('ga4-market-table').innerHTML = tbl;
+}
 
 // ─── Boot ───
 initApp();
