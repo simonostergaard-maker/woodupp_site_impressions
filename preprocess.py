@@ -650,6 +650,26 @@ def load_ga4_data():
     return data
 
 
+def load_ga4_aggregate():
+    """Load ga4.json daily data for per-market sessions/conversions in Dashboard."""
+    path = DATA_DIR / "ga4.json"
+    if not path.exists():
+        print("  ga4.json not found — GA4 columns unavailable on Dashboard")
+        return None
+    with open(path) as f:
+        data = json.load(f)
+    raw_daily = data.get("daily", {})
+    # Keep only sessions and conversions to minimise embed size
+    compact = {}
+    for date, markets in raw_daily.items():
+        compact[date] = {
+            m: {"s": v.get("sessions", 0), "c": v.get("conversions", 0)}
+            for m, v in markets.items()
+        }
+    print(f"  ga4.json: {len(compact)} daily entries embedded")
+    return {"daily": compact}
+
+
 def generate_monthly_trend(df, historical_monthly=None):
     """Combined monthly trend: historical BigQuery data + CSV data."""
     df = df.copy()
@@ -913,7 +933,7 @@ def generate_html(all_data):
         "overview", "daily_metrics", "anonymized", "url_performance",
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
-        "movers", "monthly_trend", "ga4",
+        "movers", "monthly_trend", "ga4", "ga4_agg",
     ]
     lines = []
     for key in data_keys:
@@ -956,6 +976,10 @@ def main():
     print("Loading GA4 analytics data...")
     ga4_data = load_ga4_data()
 
+    # Load GA4 aggregate daily data (for Dashboard per-market columns)
+    print("Loading GA4 aggregate data...")
+    ga4_agg = load_ga4_aggregate()
+
     # Process CSV if available
     if csv_path.exists():
         df = load_and_clean(csv_path)
@@ -989,6 +1013,8 @@ def main():
         # GA4 analytics
         if ga4_data:
             all_data["ga4"] = ga4_data
+        if ga4_agg:
+            all_data["ga4_agg"] = ga4_agg
 
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
@@ -999,6 +1025,8 @@ def main():
         ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
         if ga4_data:
             all_data["ga4"] = ga4_data
+        if ga4_agg:
+            all_data["ga4_agg"] = ga4_agg
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)
