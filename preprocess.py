@@ -651,7 +651,7 @@ def load_ga4_data():
 
 
 def load_ga4_aggregate():
-    """Load ga4.json daily data for per-market sessions/conversions in Dashboard."""
+    """Load ga4.json daily data for per-market conversions/revenue in Dashboard."""
     path = DATA_DIR / "ga4.json"
     if not path.exists():
         print("  ga4.json not found — GA4 columns unavailable on Dashboard")
@@ -659,15 +659,15 @@ def load_ga4_aggregate():
     with open(path) as f:
         data = json.load(f)
     raw_daily = data.get("daily", {})
-    # Keep only sessions and conversions to minimise embed size
+    # Keep only conversions and revenue to minimise embed size
     compact = {}
     for date, markets in raw_daily.items():
         compact[date] = {
-            m: {"s": v.get("sessions", 0), "c": v.get("conversions", 0)}
+            m: {"c": v.get("conversions", 0), "r": round(v.get("revenue", 0), 2)}
             for m, v in markets.items()
         }
     print(f"  ga4.json: {len(compact)} daily entries embedded")
-    return {"daily": compact}
+    return {"daily": compact, "currencies": data.get("currencies", {})}
 
 
 def generate_monthly_trend(df, historical_monthly=None):
