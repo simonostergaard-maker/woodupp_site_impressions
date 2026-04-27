@@ -63,6 +63,7 @@ git add index.html data\ga4_data.json
 git diff --cached --quiet
 if errorlevel 1 (
     git commit -m "Dashboard update %DATE%"
+    git pull --rebase origin main
     git push origin main
     if errorlevel 1 (
         echo ERROR: git push failed.
