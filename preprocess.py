@@ -670,13 +670,21 @@ def load_ga4_aggregate():
     return {"daily": compact, "currencies": data.get("currencies", {})}
 
 
+def load_brand_analysis():
+    """Load brand vs non-brand analysis data."""
+    path = DATA_DIR / "brand_analysis.json"
+    if not path.exists():
+        print("  brand_analysis.json not found")
+        return None
+    with open(path) as f:
+        data = json.load(f)
+    print(f"  brand_analysis.json: {len(data.get('daily', {}))} daily dates")
+    return data
+
+
 def generate_monthly_trend(df, historical_monthly=None):
     """Combined monthly trend: historical BigQuery data + CSV data."""
     df = df.copy()
-    df["month"] = df["data_date"].str[:7]
-
-    all_csv = df.groupby("month").agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
-    by_mkt_csv = df.groupby(["month","market"]).agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
 
     all_markets = {}
     by_market = {}
@@ -688,6 +696,13 @@ def generate_monthly_trend(df, historical_monthly=None):
             by_market.setdefault(mkt, {})
             for month, vals in months.items():
                 by_market[mkt][month] = {"impressions": vals["impressions"], "clicks": vals["clicks"], "source": "historical"}
+
+    if df.empty or "data_date" not in df.columns:
+        return {"months": sorted(all_markets.keys()), "all_markets": all_markets, "by_market": by_market}
+
+    df["month"] = df["data_date"].str[:7]
+    all_csv = df.groupby("month").agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
+    by_mkt_csv = df.groupby(["month","market"]).agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
 
     for _, row in all_csv.iterrows():
         all_markets[row["month"]] = {"impressions": int(row["impressions"]), "clicks": int(row["clicks"]), "source": "csv"}
@@ -933,7 +948,7 @@ def generate_html(all_data):
         "overview", "daily_metrics", "anonymized", "url_performance",
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
-        "movers", "monthly_trend", "ga4", "ga4_agg",
+        "movers", "monthly_trend", "ga4", "ga4_agg", "brand_analysis",
     ]
     lines = []
     for key in data_keys:
@@ -980,6 +995,10 @@ def main():
     print("Loading GA4 aggregate data...")
     ga4_agg = load_ga4_aggregate()
 
+    # Load brand vs non-brand analysis data
+    print("Loading brand analysis data...")
+    brand_analysis = load_brand_analysis()
+
     # Process CSV if available
     if csv_path.exists():
         df = load_and_clean(csv_path)
@@ -1015,6 +1034,8 @@ def main():
             all_data["ga4"] = ga4_data
         if ga4_agg:
             all_data["ga4_agg"] = ga4_agg
+        if brand_analysis:
+            all_data["brand_analysis"] = brand_analysis
 
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
@@ -1027,6 +1048,8 @@ def main():
             all_data["ga4"] = ga4_data
         if ga4_agg:
             all_data["ga4_agg"] = ga4_agg
+        if brand_analysis:
+            all_data["brand_analysis"] = brand_analysis
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)
