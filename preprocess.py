@@ -685,10 +685,6 @@ def load_brand_analysis():
 def generate_monthly_trend(df, historical_monthly=None):
     """Combined monthly trend: historical BigQuery data + CSV data."""
     df = df.copy()
-    df["month"] = df["data_date"].str[:7]
-
-    all_csv = df.groupby("month").agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
-    by_mkt_csv = df.groupby(["month","market"]).agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
 
     all_markets = {}
     by_market = {}
@@ -700,6 +696,13 @@ def generate_monthly_trend(df, historical_monthly=None):
             by_market.setdefault(mkt, {})
             for month, vals in months.items():
                 by_market[mkt][month] = {"impressions": vals["impressions"], "clicks": vals["clicks"], "source": "historical"}
+
+    if df.empty or "data_date" not in df.columns:
+        return {"months": sorted(all_markets.keys()), "all_markets": all_markets, "by_market": by_market}
+
+    df["month"] = df["data_date"].str[:7]
+    all_csv = df.groupby("month").agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
+    by_mkt_csv = df.groupby(["month","market"]).agg(impressions=("impressions","sum"), clicks=("clicks","sum")).reset_index()
 
     for _, row in all_csv.iterrows():
         all_markets[row["month"]] = {"impressions": int(row["impressions"]), "clicks": int(row["clicks"]), "source": "csv"}
