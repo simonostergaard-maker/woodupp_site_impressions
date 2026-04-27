@@ -17,7 +17,7 @@ from google.api_core.exceptions import NotFound
 
 PROJECT_ID  = "obsidian-375910"
 DATASET_ID  = "woodupp"
-TABLE_ID    = f"{PROJECT_ID}.{DATASET_ID}.gsc"   # adjust table name if needed
+TABLE_ID    = f"{PROJECT_ID}.{DATASET_ID}.combined_url_impressions"
 OUTPUT_PATH = Path(__file__).parent / "data" / "woodupp_url_impressions.csv"
 
 
