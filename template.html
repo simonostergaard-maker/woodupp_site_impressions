@@ -31,7 +31,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .header .subtitle { color: var(--muted); font-size: 12px; }
 
 /* Tabs */
-.tabs { display: flex; gap: 2px; background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; overflow-x: auto; }
+.tabs { display: flex; gap: 2px; background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; overflow-x: auto; position: sticky; top: 58px; z-index: 95; }
 .tab { padding: 10px 16px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; user-select: none; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
@@ -136,6 +136,36 @@ select:focus, input:focus { border-color: var(--accent); }
 
 .mini-table { font-size: 12px; }
 .mini-table td, .mini-table th { padding: 4px 8px; }
+
+/* ─── Global Date Filter Bar ─── */
+.gf-bar {
+  background: var(--card);
+  border-bottom: 2px solid rgba(99,102,241,0.35);
+  padding: 10px 24px;
+  position: sticky;
+  top: 93px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.gf-bar .filter-group { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.gf-bar .filter-group label { margin-bottom: 0; }
+.gf-custom-dates { display: flex; align-items: center; gap: 8px; }
+.gf-custom-dates label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.gf-badge {
+  display: inline-flex; align-items: center;
+  border-radius: 20px; padding: 3px 12px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.gf-badge-period { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.4); color: var(--accent2); }
+.gf-badge-compare { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.35); color: var(--green); }
+input[type="date"] {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 10px; border-radius: 6px; font-size: 13px; outline: none; cursor: pointer;
+}
+input[type="date"]:focus { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -162,21 +192,40 @@ select:focus, input:focus { border-color: var(--accent); }
   <div class="tab" data-tab="movers">Movers &amp; Shakers</div>
 </div>
 
+<!-- ─── GLOBAL DATE FILTER BAR ─── -->
+<div class="gf-bar" id="gf-bar">
+  <div class="filter-group">
+    <label>Date Range</label>
+    <select id="gf-preset">
+      <option value="last7">Last 7 days</option>
+      <option value="last14">Last 14 days</option>
+      <option value="last28" selected>Last 28 days</option>
+      <option value="mtd">This month to date</option>
+      <option value="lastMonth">Last full month</option>
+      <option value="custom">Custom range</option>
+    </select>
+  </div>
+  <div class="gf-custom-dates" id="gf-custom-dates" style="display:none">
+    <label>From</label>
+    <input type="date" id="gf-start">
+    <label>To</label>
+    <input type="date" id="gf-end">
+  </div>
+  <div class="filter-group">
+    <label>Compare to</label>
+    <select id="gf-compare">
+      <option value="prev">Previous period</option>
+      <option value="yoy">Year over Year (YoY)</option>
+      <option value="mom">Month over Month (MoM)</option>
+      <option value="none">No comparison</option>
+    </select>
+  </div>
+  <div id="gf-labels" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:4px"></div>
+</div>
+
 <div class="content">
   <!-- DASHBOARD OVERVIEW -->
   <div class="tab-content active" id="tab-overview">
-    <div class="filters" style="margin-bottom:12px">
-      <div class="filter-group"><label>Compare</label>
-        <select id="overview-preset">
-          <option value="mtdYoY">Month-to-date vs Same period last year</option>
-          <option value="mtdMoM">Month-to-date vs Same period last month</option>
-          <option value="last7vs7">Last 7 days vs Previous 7 days</option>
-          <option value="last28vs28">Last 28 days vs Previous 28 days</option>
-          <option value="yoy28">Last 28 days vs Same period last year</option>
-          <option value="momFull">Last full month vs Previous month</option>
-        </select>
-      </div>
-    </div>
     <div id="overview-comparison"></div>
     <div id="overview-kpis"></div>
     <div class="grid-2">
@@ -423,6 +472,89 @@ let DATA = {};
 const COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#3b82f6','#ec4899','#06b6d4','#a855f7','#f97316','#14b8a6','#e11d48','#8b5cf6','#84cc16','#0ea5e9','#d946ef','#64748b','#fb923c','#2dd4bf','#f43f5e','#7c3aed'];
 const charts = {};
 
+// ─── Global Date Filter State ───
+const gf = { preset: 'last28', compareType: 'prev', customStart: '', customEnd: '' };
+
+function getGlobalPeriods() {
+  const allDates = Object.keys(DATA.daily_metrics).sort();
+  const dm = DATA.daily_metrics;
+  let periodA = [], labelA = '';
+
+  if (gf.preset === 'last7') {
+    periodA = allDates.slice(-7);
+  } else if (gf.preset === 'last14') {
+    periodA = allDates.slice(-14);
+  } else if (gf.preset === 'last28') {
+    periodA = allDates.slice(-28);
+  } else if (gf.preset === 'mtd') {
+    const lastDate = allDates[allDates.length - 1];
+    const monthPrefix = lastDate.slice(0, 7);
+    periodA = allDates.filter(d => d.startsWith(monthPrefix));
+  } else if (gf.preset === 'lastMonth') {
+    const lastDate = allDates[allDates.length - 1];
+    const curMonthDate = new Date(lastDate.slice(0, 7) + '-01');
+    curMonthDate.setMonth(curMonthDate.getMonth() - 1);
+    const prevMonthPrefix = curMonthDate.toISOString().slice(0, 7);
+    periodA = allDates.filter(d => d.startsWith(prevMonthPrefix));
+  } else if (gf.preset === 'custom') {
+    if (gf.customStart && gf.customEnd) {
+      periodA = allDates.filter(d => d >= gf.customStart && d <= gf.customEnd);
+    }
+  }
+
+  if (periodA.length > 0) {
+    labelA = periodA[0] + ' → ' + periodA[periodA.length - 1];
+  }
+
+  let periodB = [], labelB = '';
+  if (periodA.length > 0 && gf.compareType !== 'none') {
+    if (gf.compareType === 'prev') {
+      const n = periodA.length;
+      const idx = allDates.indexOf(periodA[0]);
+      periodB = allDates.slice(Math.max(0, idx - n), idx);
+      if (periodB.length > 0) labelB = 'vs ' + periodB[0] + ' → ' + periodB[periodB.length - 1];
+    } else if (gf.compareType === 'yoy') {
+      const yearAgo = periodA.map(d => { const dt = new Date(d); dt.setFullYear(dt.getFullYear() - 1); return dt.toISOString().split('T')[0]; });
+      periodB = yearAgo.filter(d => dm[d]);
+      if (yearAgo.length > 0) labelB = 'vs YoY (' + yearAgo[0] + ' → ' + yearAgo[yearAgo.length - 1] + ')';
+    } else if (gf.compareType === 'mom') {
+      const shifted = periodA.map(d => { const dt = new Date(d); dt.setMonth(dt.getMonth() - 1); return dt.toISOString().split('T')[0]; });
+      periodB = shifted.filter(d => dm[d]);
+      if (shifted.length > 0) labelB = 'vs MoM (' + shifted[0] + ' → ' + shifted[shifted.length - 1] + ')';
+    }
+  }
+
+  return { periodA, periodB, labelA, labelB };
+}
+
+function getGlobalDates() {
+  return getGlobalPeriods().periodA;
+}
+
+function updateGlobalFilterLabel() {
+  const { periodA, periodB, labelA, labelB } = getGlobalPeriods();
+  const wrap = document.getElementById('gf-labels');
+  if (!wrap) return;
+  let html = '';
+  if (labelA) html += '<span class="gf-badge gf-badge-period">' + labelA + '</span>';
+  if (labelB) html += '<span class="gf-badge gf-badge-compare">' + labelB + '</span>';
+  wrap.innerHTML = html;
+}
+
+function onGlobalFilterChange() {
+  gf.preset = document.getElementById('gf-preset').value;
+  gf.compareType = document.getElementById('gf-compare').value;
+  gf.customStart = document.getElementById('gf-start').value;
+  gf.customEnd = document.getElementById('gf-end').value;
+  document.getElementById('gf-custom-dates').style.display = gf.preset === 'custom' ? 'flex' : 'none';
+  updateGlobalFilterLabel();
+  renderOverviewComparison();
+  renderOverviewDailyCharts();
+  renderDomainDailyCharts();
+  renderCountryDaily();
+  renderDeviceDailyCharts();
+}
+
 // ─── Utils ───
 function fmt(n) { return n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(1)+'K' : n.toString(); }
 function fmtN(n) { return n.toLocaleString(); }
@@ -456,6 +588,14 @@ document.getElementById('tabsBar').addEventListener('click', e => {
 // ─── Init ───
 function initApp() {
   populateFilters();
+
+  // Wire up global date filter
+  document.getElementById('gf-preset').addEventListener('change', onGlobalFilterChange);
+  document.getElementById('gf-compare').addEventListener('change', onGlobalFilterChange);
+  document.getElementById('gf-start').addEventListener('change', onGlobalFilterChange);
+  document.getElementById('gf-end').addEventListener('change', onGlobalFilterChange);
+  updateGlobalFilterLabel();
+
   renderOverview();
   renderAnonymized();
   renderUrls();
@@ -517,26 +657,11 @@ function renderOverview() {
       <div class="kpi"><div class="label">Markets</div><div class="value">${DATA.overview.markets.length}</div></div>
     </div>`;
 
-  // Overview comparison
-  document.getElementById('overview-preset').addEventListener('change', renderOverviewComparison);
+  // Overview comparison (driven by global filter)
   renderOverviewComparison();
 
-  // Daily impressions/clicks charts
-  const dates = DATA.overview.dates;
-  const dm = DATA.daily_metrics;
-  const markets = Object.keys(DATA.overview.per_market).sort((a,b) => DATA.overview.per_market[b].impressions - DATA.overview.per_market[a].impressions).slice(0,8);
-
-  const impDatasets = markets.map((m,i) => ({
-    label: m, data: dates.map(d => dm[d]?.[m]?.impressions || 0),
-    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
-  }));
-  makeChart('chart-daily-impressions', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:impDatasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
-
-  const clickDatasets = markets.map((m,i) => ({
-    label: m, data: dates.map(d => dm[d]?.[m]?.clicks || 0),
-    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
-  }));
-  makeChart('chart-daily-clicks', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:clickDatasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  // Daily impressions/clicks charts (driven by global filter)
+  renderOverviewDailyCharts();
 
   // Market summary table
   const pm = DATA.overview.per_market;
@@ -579,64 +704,25 @@ function renderOverview() {
   }
 }
 
-function renderOverviewComparison() {
-  const preset = document.getElementById('overview-preset').value;
-  const allDates = Object.keys(DATA.daily_metrics).sort();
+function renderOverviewDailyCharts() {
+  const dates = getGlobalDates();
   const dm = DATA.daily_metrics;
-  let periodA, periodB, labelA, labelB;
+  const markets = Object.keys(DATA.overview.per_market).sort((a,b) => DATA.overview.per_market[b].impressions - DATA.overview.per_market[a].impressions).slice(0,8);
+  const impDatasets = markets.map((m,i) => ({
+    label: m, data: dates.map(d => dm[d]?.[m]?.impressions || 0),
+    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
+  }));
+  makeChart('chart-daily-impressions', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:impDatasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  const clickDatasets = markets.map((m,i) => ({
+    label: m, data: dates.map(d => dm[d]?.[m]?.clicks || 0),
+    borderColor: COLORS[i], backgroundColor: COLORS[i]+'20', fill: false, tension: 0.3, borderWidth: 2, pointRadius: 2,
+  }));
+  makeChart('chart-daily-clicks', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:clickDatasets}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11},color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+}
 
-  if (preset === 'mtdYoY') {
-    const lastDate = allDates[allDates.length - 1];
-    const monthPrefix = lastDate.slice(0, 7);
-    const day = parseInt(lastDate.slice(8, 10));
-    periodA = allDates.filter(d => d.startsWith(monthPrefix));
-    const lastDt = new Date(lastDate);
-    const lyYear = lastDt.getFullYear() - 1;
-    const lyMonth = String(lastDt.getMonth() + 1).padStart(2, '0');
-    const lyPrefix = lyYear + '-' + lyMonth;
-    const lyEnd = lyPrefix + '-' + String(day).padStart(2, '0');
-    periodB = allDates.filter(d => d.startsWith(lyPrefix) && d <= lyEnd);
-    labelA = `${monthPrefix}-01 to ${lastDate}`;
-    labelB = `${lyPrefix}-01 to ${lyEnd} (YoY)`;
-  } else if (preset === 'mtdMoM') {
-    const lastDate = allDates[allDates.length - 1];
-    const monthPrefix = lastDate.slice(0, 7);
-    const day = parseInt(lastDate.slice(8, 10));
-    periodA = allDates.filter(d => d.startsWith(monthPrefix));
-    const lastDt = new Date(lastDate);
-    const pmDate = new Date(lastDt.getFullYear(), lastDt.getMonth() - 1, 1);
-    const pmPrefix = pmDate.toISOString().slice(0, 7);
-    const pmEnd = pmPrefix + '-' + String(day).padStart(2, '0');
-    periodB = allDates.filter(d => d.startsWith(pmPrefix) && d <= pmEnd);
-    labelA = `${monthPrefix}-01 to ${lastDate}`;
-    labelB = `${pmPrefix}-01 to ${pmEnd} (MoM)`;
-  } else if (preset === 'last7vs7') {
-    periodA = allDates.slice(-7);
-    periodB = allDates.slice(-14, -7);
-    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
-    labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
-  } else if (preset === 'last28vs28') {
-    periodA = allDates.slice(-28);
-    periodB = allDates.slice(-56, -28);
-    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
-    labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
-  } else if (preset === 'yoy28') {
-    periodA = allDates.slice(-28);
-    const yearAgo = periodA.map(d => { const dt=new Date(d); dt.setFullYear(dt.getFullYear()-1); return dt.toISOString().split('T')[0]; });
-    periodB = yearAgo.filter(d => dm[d]);
-    labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
-    labelB = `${yearAgo[0]} to ${yearAgo[yearAgo.length-1]} (YoY)`;
-  } else if (preset === 'momFull') {
-    const lastDate = allDates[allDates.length - 1];
-    const lastMonth = lastDate.slice(0, 7);
-    const prevMonthDate = new Date(lastMonth + '-01');
-    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-    const prevMonth = prevMonthDate.toISOString().slice(0, 7);
-    periodA = allDates.filter(d => d.startsWith(lastMonth));
-    periodB = allDates.filter(d => d.startsWith(prevMonth));
-    labelA = `${lastMonth} (${periodA.length} days)`;
-    labelB = `${prevMonth} (${periodB.length} days)`;
-  }
+function renderOverviewComparison() {
+  const { periodA, periodB, labelA, labelB } = getGlobalPeriods();
+  const dm = DATA.daily_metrics;
 
   if (!periodA || periodA.length === 0) {
     document.getElementById('overview-comparison').innerHTML = '';
@@ -979,7 +1065,7 @@ function renderCountries() {
 
 function renderCountryDaily() {
   const active = [...document.querySelectorAll('#country-pills .pill.active')].map(p=>p.textContent);
-  const dates = DATA.overview.dates;
+  const dates = getGlobalDates();
   const daily = DATA.country_data.daily;
   const datasets = active.map((c,i) => ({
     label: c, data: dates.map(d => daily[d]?.[c]?.impressions || 0),
@@ -1025,18 +1111,8 @@ function renderDomains() {
   html += '</div>';
   document.getElementById('domain-comparison').innerHTML = html;
 
-  // Daily comparison charts
-  const dates = DATA.overview.dates;
-  const dm = DATA.daily_metrics;
-  makeChart('chart-domain-comp-imp', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
-    {label:a,data:dates.map(d=>dm[d]?.[a]?.impressions||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:3},
-    {label:b,data:dates.map(d=>dm[d]?.[b]?.impressions||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:3},
-  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
-
-  makeChart('chart-domain-comp-clicks', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
-    {label:a,data:dates.map(d=>dm[d]?.[a]?.clicks||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:3},
-    {label:b,data:dates.map(d=>dm[d]?.[b]?.clicks||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:3},
-  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  // Daily comparison charts (driven by global filter)
+  renderDomainDailyCharts();
 
   // All markets ranked
   const allMarkets = Object.entries(pm).sort((a,b)=>b[1].impressions-a[1].impressions);
@@ -1047,13 +1123,27 @@ function renderDomains() {
 document.getElementById('domain-a').addEventListener('change', renderDomains);
 document.getElementById('domain-b').addEventListener('change', renderDomains);
 
+function renderDomainDailyCharts() {
+  const a = document.getElementById('domain-a').value;
+  const b = document.getElementById('domain-b').value;
+  const dates = getGlobalDates();
+  const dm = DATA.daily_metrics;
+  makeChart('chart-domain-comp-imp', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:a,data:dates.map(d=>dm[d]?.[a]?.impressions||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:3},
+    {label:b,data:dates.map(d=>dm[d]?.[b]?.impressions||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:3},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  makeChart('chart-domain-comp-clicks', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
+    {label:a,data:dates.map(d=>dm[d]?.[a]?.clicks||0),borderColor:'#6366f1',tension:0.3,borderWidth:2,pointRadius:3},
+    {label:b,data:dates.map(d=>dm[d]?.[b]?.clicks||0),borderColor:'#22c55e',tension:0.3,borderWidth:2,pointRadius:3},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+}
+
 // ═══════════════════════════════════════════
 // TAB 7: DEVICE & SEARCH TYPE
 // ═══════════════════════════════════════════
 function renderDevices() {
   const market = document.getElementById('dev-market-filter').value;
   const ds = DATA.device_search;
-  const dates = DATA.overview.dates;
 
   // Device pie
   let deviceData;
@@ -1089,21 +1179,8 @@ function renderDevices() {
   const stLabels = Object.keys(searchData);
   makeChart('chart-search-pie', { type:'doughnut', data:{labels:stLabels,datasets:[{data:stLabels.map(s=>searchData[s].impressions),backgroundColor:['#3b82f6','#ec4899','#06b6d4']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
 
-  // Daily device
-  const dailyDev = ds.daily_device;
-  const devices = ['DESKTOP','MOBILE','TABLET'];
-  makeChart('chart-device-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({
-    label:dev, data:dates.map(d=>dailyDev[d]?.[dev]?.impressions||0),
-    borderColor:['#6366f1','#22c55e','#f59e0b'][i], tension:0.3, borderWidth:2, pointRadius:2,
-  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
-
-  // Daily search type
-  const dailySt = ds.daily_search;
-  const stypes = ['WEB','IMAGE','VIDEO'];
-  makeChart('chart-search-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({
-    label:st, data:dates.map(d=>dailySt[d]?.[st]?.impressions||0),
-    borderColor:['#3b82f6','#ec4899','#06b6d4'][i], tension:0.3, borderWidth:2, pointRadius:2,
-  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  // Daily charts (driven by global filter)
+  renderDeviceDailyCharts();
 
   // Device by market table
   const allMarkets = Object.keys(ds.by_market_device).sort();
@@ -1121,6 +1198,23 @@ function renderDevices() {
   document.getElementById('device-market-table').innerHTML = html;
 }
 document.getElementById('dev-market-filter').addEventListener('change', renderDevices);
+
+function renderDeviceDailyCharts() {
+  const ds = DATA.device_search;
+  const dates = getGlobalDates();
+  const devices = ['DESKTOP','MOBILE','TABLET'];
+  const dailyDev = ds.daily_device;
+  makeChart('chart-device-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({
+    label:dev, data:dates.map(d=>dailyDev[d]?.[dev]?.impressions||0),
+    borderColor:['#6366f1','#22c55e','#f59e0b'][i], tension:0.3, borderWidth:2, pointRadius:2,
+  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+  const dailySt = ds.daily_search;
+  const stypes = ['WEB','IMAGE','VIDEO'];
+  makeChart('chart-search-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({
+    label:st, data:dates.map(d=>dailySt[d]?.[st]?.impressions||0),
+    borderColor:['#3b82f6','#ec4899','#06b6d4'][i], tension:0.3, borderWidth:2, pointRadius:2,
+  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+}
 
 // ═══════════════════════════════════════════
 // TAB 8: DATE COMPARISON
