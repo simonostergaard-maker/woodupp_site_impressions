@@ -174,6 +174,7 @@ select:focus, input:focus { border-color: var(--accent); }
           <option value="last28vs28">Last 28 days vs Previous 28 days</option>
           <option value="yoy28">Last 28 days vs Same period last year</option>
           <option value="momFull">Last full month vs Previous month</option>
+          <option value="momFullYoY">Last full month vs Same month last year</option>
         </select>
       </div>
     </div>
@@ -294,6 +295,7 @@ select:focus, input:focus { border-color: var(--accent); }
           <option value="last7vs7">Last 7 days vs Previous 7 days</option>
           <option value="last3vs3">Last 3 days vs Previous 3 days</option>
           <option value="momFull">Last full month vs Previous month</option>
+          <option value="momFullYoY">Last full month vs Same month last year</option>
           <option value="yoy28">Last 28 days vs Same period last year</option>
           <option value="custom">Custom</option>
         </select>
@@ -356,6 +358,8 @@ select:focus, input:focus { border-color: var(--accent); }
           <option value="7">Last 7 days vs Previous 7 days</option>
           <option value="14">Last 14 days vs Previous 14 days</option>
           <option value="30" selected>Last 30 days vs Previous 30 days</option>
+          <option value="momFull">Last full month vs Previous month</option>
+          <option value="momFullYoY">Last full month vs Same month last year</option>
           <option value="0">All time (no comparison)</option>
         </select>
       </div>
@@ -626,16 +630,28 @@ function renderOverviewComparison() {
     periodB = yearAgo.filter(d => dm[d]);
     labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
     labelB = `${yearAgo[0]} to ${yearAgo[yearAgo.length-1]} (YoY)`;
-  } else if (preset === 'momFull') {
+  } else if (preset === 'momFull' || preset === 'momFullYoY') {
     const lastDate = allDates[allDates.length - 1];
-    const lastMonth = lastDate.slice(0, 7);
-    const prevMonthDate = new Date(lastMonth + '-01');
-    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-    const prevMonth = prevMonthDate.toISOString().slice(0, 7);
-    periodA = allDates.filter(d => d.startsWith(lastMonth));
-    periodB = allDates.filter(d => d.startsWith(prevMonth));
-    labelA = `${lastMonth} (${periodA.length} days)`;
-    labelB = `${prevMonth} (${periodB.length} days)`;
+    const currentMonth = lastDate.slice(0, 7);
+    const lastFullMonthDate = new Date(currentMonth + '-01');
+    lastFullMonthDate.setMonth(lastFullMonthDate.getMonth() - 1);
+    const lastFullMonth = lastFullMonthDate.toISOString().slice(0, 7);
+    periodA = allDates.filter(d => d.startsWith(lastFullMonth));
+    if (preset === 'momFull') {
+      const prevMonthDate = new Date(lastFullMonth + '-01');
+      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+      const prevMonth = prevMonthDate.toISOString().slice(0, 7);
+      periodB = allDates.filter(d => d.startsWith(prevMonth));
+      labelA = `${lastFullMonth} (${periodA.length} days)`;
+      labelB = `${prevMonth} (${periodB.length} days)`;
+    } else {
+      const yoyMonthDate = new Date(lastFullMonth + '-01');
+      yoyMonthDate.setFullYear(yoyMonthDate.getFullYear() - 1);
+      const yoyMonth = yoyMonthDate.toISOString().slice(0, 7);
+      periodB = allDates.filter(d => d.startsWith(yoyMonth));
+      labelA = `${lastFullMonth} (${periodA.length} days)`;
+      labelB = `${yoyMonth} (${periodB.length} days, YoY)`;
+    }
   }
 
   if (!periodA || periodA.length === 0) {
@@ -1150,16 +1166,28 @@ function runComparison() {
     periodB = dates.slice(-6, -3);
     labelA = `${periodA[0]} to ${periodA[periodA.length-1]}`;
     labelB = `${periodB[0]} to ${periodB[periodB.length-1]}`;
-  } else if (preset === 'momFull') {
+  } else if (preset === 'momFull' || preset === 'momFullYoY') {
     const lastDate = dates[dates.length - 1];
-    const lastMonth = lastDate.slice(0, 7);
-    const prevMonthDate = new Date(lastMonth + '-01');
-    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-    const prevMonth = prevMonthDate.toISOString().slice(0, 7);
-    periodA = dates.filter(d => d.startsWith(lastMonth));
-    periodB = dates.filter(d => d.startsWith(prevMonth));
-    labelA = `${lastMonth} (${periodA.length} days)`;
-    labelB = `${prevMonth} (${periodB.length} days)`;
+    const currentMonth = lastDate.slice(0, 7);
+    const lastFullMonthDate = new Date(currentMonth + '-01');
+    lastFullMonthDate.setMonth(lastFullMonthDate.getMonth() - 1);
+    const lastFullMonth = lastFullMonthDate.toISOString().slice(0, 7);
+    periodA = dates.filter(d => d.startsWith(lastFullMonth));
+    if (preset === 'momFull') {
+      const prevMonthDate = new Date(lastFullMonth + '-01');
+      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+      const prevMonth = prevMonthDate.toISOString().slice(0, 7);
+      periodB = dates.filter(d => d.startsWith(prevMonth));
+      labelA = `${lastFullMonth} (${periodA.length} days)`;
+      labelB = `${prevMonth} (${periodB.length} days)`;
+    } else {
+      const yoyMonthDate = new Date(lastFullMonth + '-01');
+      yoyMonthDate.setFullYear(yoyMonthDate.getFullYear() - 1);
+      const yoyMonth = yoyMonthDate.toISOString().slice(0, 7);
+      periodB = dates.filter(d => d.startsWith(yoyMonth));
+      labelA = `${lastFullMonth} (${periodA.length} days)`;
+      labelB = `${yoyMonth} (${periodB.length} days, YoY)`;
+    }
   } else if (preset === 'yoy28') {
     periodA = dates.slice(-28);
     const yearAgo = periodA.map(d => { const dt=new Date(d); dt.setFullYear(dt.getFullYear()-1); return dt.toISOString().split('T')[0]; });
@@ -1581,7 +1609,7 @@ function renderBrandAnalysis() {
   }
 
   const market = document.getElementById('brand-market-filter').value;
-  const period = parseInt(document.getElementById('brand-period-compare').value);
+  const periodVal = document.getElementById('brand-period-compare').value;
 
   const allDates = Object.keys(bd.daily || {}).sort();
 
@@ -1608,11 +1636,32 @@ function renderBrandAnalysis() {
   }
 
   let curDates, cmpDates;
-  if (period === 0) {
-    curDates = allDates; cmpDates = [];
+  if (periodVal === 'momFull' || periodVal === 'momFullYoY') {
+    const lastDate = allDates[allDates.length - 1];
+    const currentMonth = lastDate.slice(0, 7);
+    const lastFullMonthDate = new Date(currentMonth + '-01');
+    lastFullMonthDate.setMonth(lastFullMonthDate.getMonth() - 1);
+    const lastFullMonth = lastFullMonthDate.toISOString().slice(0, 7);
+    curDates = allDates.filter(d => d.startsWith(lastFullMonth));
+    if (periodVal === 'momFull') {
+      const prevMonthDate = new Date(lastFullMonth + '-01');
+      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+      const prevMonth = prevMonthDate.toISOString().slice(0, 7);
+      cmpDates = allDates.filter(d => d.startsWith(prevMonth));
+    } else {
+      const yoyMonthDate = new Date(lastFullMonth + '-01');
+      yoyMonthDate.setFullYear(yoyMonthDate.getFullYear() - 1);
+      const yoyMonth = yoyMonthDate.toISOString().slice(0, 7);
+      cmpDates = allDates.filter(d => d.startsWith(yoyMonth));
+    }
   } else {
-    curDates = allDates.slice(-period);
-    cmpDates = allDates.slice(-period*2, -period);
+    const period = parseInt(periodVal);
+    if (period === 0) {
+      curDates = allDates; cmpDates = [];
+    } else {
+      curDates = allDates.slice(-period);
+      cmpDates = allDates.slice(-period*2, -period);
+    }
   }
 
   function sumDates(dates) {
