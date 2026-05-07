@@ -37,6 +37,7 @@ DOMAIN_MARKET_MAP = {
     "de": {"domain": "woodupp.de", "market": "Germany", "flag": "\U0001f1e9\U0001f1ea"},
     "dk": {"domain": "woodupp.dk", "market": "Denmark", "flag": "\U0001f1e9\U0001f1f0"},
     "es": {"domain": "woodupp.es", "market": "Spain", "flag": "\U0001f1ea\U0001f1f8"},
+    "eu": {"domain": "woodupp.eu", "market": "Europe (.eu)", "flag": "\U0001f1ea\U0001f1fa"},
     "fr": {"domain": "woodupp.fr", "market": "France", "flag": "\U0001f1eb\U0001f1f7"},
     "it": {"domain": "woodupp.it", "market": "Italy", "flag": "\U0001f1ee\U0001f1f9"},
     "nl": {"domain": "woodupp.nl", "market": "Netherlands", "flag": "\U0001f1f3\U0001f1f1"},
