@@ -59,7 +59,7 @@ if errorlevel 1 (
 :: ── Step 5: Commit and push to GitHub ────────────────────────
 echo.
 echo [5/5] Pushing to GitHub...
-git add index.html data\ga4_data.json
+git add index.html data\ga4_data.json data\ga4.json
 git diff --cached --quiet
 if errorlevel 1 (
     git commit -m "Dashboard update %DATE%"

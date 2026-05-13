@@ -1,5 +1,7 @@
 """
-Extracts GA4 analytics data from BigQuery and saves to data/ga4_data.json.
+Extracts GA4 analytics data from BigQuery and saves to:
+  data/ga4_data.json  — Analytics tab (monthly + last 90 days daily)
+  data/ga4.json       — Dashboard tab (2-year daily per-market conversions/revenue)
 
 Requires: google-cloud-bigquery  (pip install google-cloud-bigquery)
 Auth:      set GOOGLE_APPLICATION_CREDENTIALS or run `gcloud auth application-default login`
@@ -13,6 +15,29 @@ from google.cloud import bigquery
 
 PROJECT_ID = "obsidian-375910"
 OUTPUT_PATH = Path(__file__).parent / "data" / "ga4_data.json"
+AGG_OUTPUT_PATH = Path(__file__).parent / "data" / "ga4.json"
+
+CURRENCY_MAP = {
+    "Australia": "AUD",
+    "Austria": "EUR",
+    "Belgium": "EUR",
+    "Denmark": "DKK",
+    "France": "EUR",
+    "Germany": "EUR",
+    "Global (.com)": "EUR",
+    "Italy": "EUR",
+    "Netherlands": "EUR",
+    "Norway": "NOK",
+    "Poland": "PLN",
+    "Portugal": "EUR",
+    "South Africa": "ZAR",
+    "Spain": "EUR",
+    "Sweden": "SEK",
+    "Switzerland": "CHF",
+    "UAE": "AED",
+    "USA": "USD",
+    "United Kingdom": "GBP",
+}
 
 ACCOUNT_MAP = {
     "GA4 - WoodUpp AE \U0001f1e6\U0001f1ea": "UAE",
@@ -35,6 +60,76 @@ ACCOUNT_MAP = {
     "GA4 - WoodUpp USA \U0001f1fa\U0001f1f8": "USA",
     "GA4 - WoodUpp ZA \U0001f1ff\U0001f1e6": "South Africa",
 }
+
+
+def build_ga4_agg(client):
+    """Build ga4.json: 2-year daily per-market data for the Dashboard tab."""
+    print("Querying full daily history for ga4.json...")
+    q = """
+        SELECT
+            account_name,
+            CAST(date AS STRING) AS date,
+            SUM(CAST(sessions AS INT64)) AS sessions,
+            SUM(CAST(totalusers AS INT64)) AS users,
+            SUM(CAST(conversions AS INT64)) AS conversions,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
+        FROM `obsidian-375910.woodupp.ga4`
+        WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
+        GROUP BY account_name, date
+        ORDER BY date, account_name
+    """
+
+    daily = {}
+    totals = {}
+    for row in client.query(q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        daily.setdefault(row.date, {})[market] = {
+            "sessions": row.sessions,
+            "users": row.users,
+            "conversions": row.conversions,
+            "revenue": float(row.revenue),
+        }
+        t = totals.setdefault(market, {"sessions": 0, "users": 0, "conversions": 0, "revenue": 0.0})
+        t["sessions"] += row.sessions
+        t["users"] += row.users
+        t["conversions"] += row.conversions
+        t["revenue"] = round(t["revenue"] + float(row.revenue), 2)
+
+    for market, t in totals.items():
+        t["currency"] = CURRENCY_MAP.get(market, "EUR")
+
+    all_dates = sorted(daily.keys())
+    all_markets = sorted(totals.keys())
+    totals_all = {
+        "sessions": sum(t["sessions"] for t in totals.values()),
+        "users": sum(t["users"] for t in totals.values()),
+        "conversions": sum(t["conversions"] for t in totals.values()),
+    }
+
+    agg_data = {
+        "has_data": bool(daily),
+        "date_range": {
+            "start": all_dates[0] if all_dates else "",
+            "end": all_dates[-1] if all_dates else "",
+        },
+        "dates": all_dates,
+        "markets": all_markets,
+        "currencies": {m: CURRENCY_MAP.get(m, "EUR") for m in all_markets},
+        "daily": daily,
+        "totals_per_market": totals,
+        "totals_all": totals_all,
+    }
+
+    AGG_OUTPUT_PATH.parent.mkdir(exist_ok=True)
+    with open(AGG_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(agg_data, f, ensure_ascii=False)
+
+    import os
+    size_mb = os.path.getsize(AGG_OUTPUT_PATH) / (1024 * 1024)
+    print(f"  {len(all_dates)} dates, {len(all_markets)} markets")
+    print(f"  Saved {AGG_OUTPUT_PATH} ({size_mb:.2f} MB)")
 
 
 def main():
@@ -149,6 +244,9 @@ def main():
     size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
     print(f"\nSaved {OUTPUT_PATH} ({size_mb:.2f} MB)")
     print(f"Months: {all_months[0]} to {all_months[-1]}")
+
+    print("\nBuilding ga4.json (Dashboard tab)...")
+    build_ga4_agg(client)
 
 
 if __name__ == "__main__":
