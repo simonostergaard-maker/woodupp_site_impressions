@@ -70,11 +70,11 @@ def build_ga4_agg(client):
             account_name,
             CAST(date AS STRING) AS date,
             SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(totalusers AS INT64)) AS users,
-            SUM(CAST(conversions AS INT64)) AS conversions,
+            SUM(CAST(transactions AS INT64)) AS conversions,
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `obsidian-375910.woodupp.ga4`
-        WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
+        FROM `obsidian-375910.woodupp.ga4_v2`
+        WHERE session_default_channel_group = 'Organic Search'
+          AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
         GROUP BY account_name, date
         ORDER BY date, account_name
     """
@@ -87,13 +87,12 @@ def build_ga4_agg(client):
             continue
         daily.setdefault(row.date, {})[market] = {
             "sessions": row.sessions,
-            "users": row.users,
+            "users": 0,
             "conversions": row.conversions,
             "revenue": float(row.revenue),
         }
         t = totals.setdefault(market, {"sessions": 0, "users": 0, "conversions": 0, "revenue": 0.0})
         t["sessions"] += row.sessions
-        t["users"] += row.users
         t["conversions"] += row.conversions
         t["revenue"] = round(t["revenue"] + float(row.revenue), 2)
 
@@ -141,10 +140,10 @@ def main():
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
             SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(totalusers AS INT64)) AS users,
-            SUM(CAST(conversions AS INT64)) AS conversions,
+            SUM(CAST(transactions AS INT64)) AS conversions,
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `obsidian-375910.woodupp.ga4`
+        FROM `obsidian-375910.woodupp.ga4_v2`
+        WHERE session_default_channel_group = 'Organic Search'
         GROUP BY account_name, month
         ORDER BY account_name, month
     """
@@ -156,7 +155,7 @@ def main():
         monthly.setdefault(market, {})
         monthly[market][row.month] = {
             "sessions": row.sessions,
-            "users": row.users,
+            "users": 0,
             "conversions": row.conversions,
             "revenue": float(row.revenue),
         }
@@ -191,11 +190,11 @@ def main():
             account_name,
             CAST(date AS STRING) AS date,
             SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(totalusers AS INT64)) AS users,
-            SUM(CAST(conversions AS INT64)) AS conversions,
+            SUM(CAST(transactions AS INT64)) AS conversions,
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `obsidian-375910.woodupp.ga4`
-        WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+        FROM `obsidian-375910.woodupp.ga4_v2`
+        WHERE session_default_channel_group = 'Organic Search'
+          AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
         GROUP BY account_name, date
         ORDER BY account_name, date
     """
@@ -207,7 +206,7 @@ def main():
         daily.setdefault(row.date, {})
         daily[row.date][market] = {
             "sessions": row.sessions,
-            "users": row.users,
+            "users": 0,
             "conversions": row.conversions,
             "revenue": float(row.revenue),
         }
