@@ -4,6 +4,11 @@ Extracts GA4 analytics data from BigQuery and saves to:
   data/ga4.json       — Dashboard tab (2-year daily per-market conversions/revenue)
   data/ai_traffic.json — AI Traffic tab (monthly + daily, medium='ai-assistant')
 
+Data sources:
+  ga4_v3_sessions — per-account daily sessions by source/medium
+  ga4_v3_revenue  — per-account daily total revenue & purchase conversions
+  ga4_events      — per-account event counts
+
 Requires: google-cloud-bigquery  (pip install google-cloud-bigquery)
 Auth:      set GOOGLE_APPLICATION_CREDENTIALS or run `gcloud auth application-default login`
 
@@ -15,7 +20,8 @@ from pathlib import Path
 from google.cloud import bigquery
 
 PROJECT_ID = "obsidian-375910"
-GA4_TABLE = f"{PROJECT_ID}.woodupp.ga4_v3"
+SESSIONS_TABLE = f"{PROJECT_ID}.woodupp.ga4_v3_sessions"
+REVENUE_TABLE = f"{PROJECT_ID}.woodupp.ga4_v3_revenue"
 EVENTS_TABLE = f"{PROJECT_ID}.woodupp.ga4_events"
 OUTPUT_PATH = Path(__file__).parent / "data" / "ga4_data.json"
 AGG_OUTPUT_PATH = Path(__file__).parent / "data" / "ga4.json"
@@ -66,39 +72,65 @@ ACCOUNT_MAP = {
 }
 
 
-def build_ga4_agg(client):
-    """Build ga4.json: 2-year daily per-market data for the Dashboard tab."""
-    print("Querying full daily history for ga4.json...")
+def query_revenue_by_date(client, date_filter=""):
+    """Query revenue table and return dict: {(market, date_str): {revenue, conversions}}."""
+    where = f"WHERE {date_filter}" if date_filter else ""
     q = f"""
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
-            SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(transactions AS INT64)) AS conversions,
-            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `{GA4_TABLE}`
-        WHERE medium = 'organic'
-          AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
+            SUM(CAST(totalrevenue AS FLOAT64)) AS revenue,
+            SUM(CAST(conversions_purchase AS INT64)) AS conversions
+        FROM `{REVENUE_TABLE}`
+        {where}
         GROUP BY account_name, date
-        ORDER BY date, account_name
     """
-
-    daily = {}
-    totals = {}
+    result = {}
     for row in client.query(q):
         market = ACCOUNT_MAP.get(row.account_name)
         if not market:
             continue
+        result[(market, row.date)] = {
+            "revenue": round(float(row.revenue), 2),
+            "conversions": row.conversions,
+        }
+    return result
+
+
+def build_ga4_agg(client):
+    """Build ga4.json: 2-year daily per-market data for the Dashboard tab."""
+    print("Querying full daily history for ga4.json...")
+
+    sessions_q = f"""
+        SELECT
+            account_name,
+            CAST(date AS STRING) AS date,
+            SUM(CAST(sessions AS INT64)) AS sessions
+        FROM `{SESSIONS_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'organic'
+          AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
+        GROUP BY account_name, date
+        ORDER BY date, account_name
+    """
+    rev = query_revenue_by_date(client, "date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)")
+
+    daily = {}
+    totals = {}
+    for row in client.query(sessions_q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        r = rev.get((market, row.date), {"revenue": 0.0, "conversions": 0})
         daily.setdefault(row.date, {})[market] = {
             "sessions": row.sessions,
             "users": 0,
-            "conversions": row.conversions,
-            "revenue": float(row.revenue),
+            "conversions": r["conversions"],
+            "revenue": r["revenue"],
         }
         t = totals.setdefault(market, {"sessions": 0, "users": 0, "conversions": 0, "revenue": 0.0})
         t["sessions"] += row.sessions
-        t["conversions"] += row.conversions
-        t["revenue"] = round(t["revenue"] + float(row.revenue), 2)
+        t["conversions"] += r["conversions"]
+        t["revenue"] = round(t["revenue"] + r["revenue"], 2)
 
     for market, t in totals.items():
         t["currency"] = CURRENCY_MAP.get(market, "EUR")
@@ -143,12 +175,10 @@ def build_ai_traffic(client):
         SELECT
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
-            source,
-            SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(transactions AS INT64)) AS conversions,
-            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `{GA4_TABLE}`
-        WHERE medium = 'ai-assistant'
+            SPLIT(source_medium, ' / ')[SAFE_OFFSET(0)] AS source,
+            SUM(CAST(sessions AS INT64)) AS sessions
+        FROM `{SESSIONS_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'ai-assistant'
         GROUP BY account_name, month, source
         ORDER BY account_name, month, source
     """
@@ -161,12 +191,10 @@ def build_ai_traffic(client):
         monthly.setdefault(market, {})
         monthly[market].setdefault(row.month, {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}})
         monthly[market][row.month]["sessions"] += row.sessions
-        monthly[market][row.month]["conversions"] += row.conversions
-        monthly[market][row.month]["revenue"] = round(monthly[market][row.month]["revenue"] + float(row.revenue), 2)
         monthly[market][row.month]["by_source"][row.source] = {
             "sessions": row.sessions,
-            "conversions": row.conversions,
-            "revenue": float(row.revenue),
+            "conversions": 0,
+            "revenue": 0.0,
         }
         sources.add(row.source)
     print(f"  Monthly: {len(monthly)} markets, {len(sources)} AI sources: {sorted(sources)}")
@@ -175,12 +203,10 @@ def build_ai_traffic(client):
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
-            source,
-            SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(transactions AS INT64)) AS conversions,
-            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `{GA4_TABLE}`
-        WHERE medium = 'ai-assistant'
+            SPLIT(source_medium, ' / ')[SAFE_OFFSET(0)] AS source,
+            SUM(CAST(sessions AS INT64)) AS sessions
+        FROM `{SESSIONS_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'ai-assistant'
         GROUP BY account_name, date, source
         ORDER BY date, account_name, source
     """
@@ -193,21 +219,16 @@ def build_ai_traffic(client):
         if market not in daily[row.date]:
             daily[row.date][market] = {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}}
         daily[row.date][market]["sessions"] += row.sessions
-        daily[row.date][market]["conversions"] += row.conversions
-        daily[row.date][market]["revenue"] = round(daily[row.date][market]["revenue"] + float(row.revenue), 2)
         daily[row.date][market]["by_source"][row.source] = {
             "sessions": row.sessions,
-            "conversions": row.conversions,
-            "revenue": float(row.revenue),
+            "conversions": 0,
+            "revenue": 0.0,
         }
 
     for date in daily:
         totals = {"sessions": 0, "conversions": 0, "revenue": 0.0}
         for m, d in daily[date].items():
             totals["sessions"] += d["sessions"]
-            totals["conversions"] += d["conversions"]
-            totals["revenue"] += d["revenue"]
-        totals["revenue"] = round(totals["revenue"], 2)
         daily[date]["All Markets"] = totals
 
     all_months = sorted(set(m for mkt in monthly.values() for m in mkt))
@@ -237,33 +258,64 @@ def build_ai_traffic(client):
 def main():
     client = bigquery.Client(project=PROJECT_ID)
 
-    print("Querying monthly sessions/revenue (organic)...")
-    monthly_q = f"""
+    # --- Monthly organic sessions + revenue ---
+    print("Querying monthly sessions (organic)...")
+    sessions_q = f"""
         SELECT
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
-            SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(transactions AS INT64)) AS conversions,
-            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `{GA4_TABLE}`
-        WHERE medium = 'organic'
+            SUM(CAST(sessions AS INT64)) AS sessions
+        FROM `{SESSIONS_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'organic'
         GROUP BY account_name, month
         ORDER BY account_name, month
     """
-    monthly = {}
-    for row in client.query(monthly_q):
+    print("Querying monthly revenue...")
+    revenue_q = f"""
+        SELECT
+            account_name,
+            FORMAT_DATE('%Y-%m', date) AS month,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue,
+            SUM(CAST(conversions_purchase AS INT64)) AS conversions
+        FROM `{REVENUE_TABLE}`
+        GROUP BY account_name, month
+        ORDER BY account_name, month
+    """
+
+    monthly_sessions = {}
+    for row in client.query(sessions_q):
         market = ACCOUNT_MAP.get(row.account_name)
         if not market:
             continue
-        monthly.setdefault(market, {})
-        monthly[market][row.month] = {
-            "sessions": row.sessions,
-            "users": 0,
-            "conversions": row.conversions,
+        monthly_sessions.setdefault(market, {})[row.month] = row.sessions
+
+    monthly_revenue = {}
+    for row in client.query(revenue_q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        monthly_revenue.setdefault(market, {})[row.month] = {
             "revenue": float(row.revenue),
+            "conversions": row.conversions,
         }
+
+    monthly = {}
+    all_markets = set(list(monthly_sessions.keys()) + list(monthly_revenue.keys()))
+    for market in all_markets:
+        monthly[market] = {}
+        all_m = set(list(monthly_sessions.get(market, {}).keys()) + list(monthly_revenue.get(market, {}).keys()))
+        for month in all_m:
+            sess = monthly_sessions.get(market, {}).get(month, 0)
+            rev = monthly_revenue.get(market, {}).get(month, {"revenue": 0.0, "conversions": 0})
+            monthly[market][month] = {
+                "sessions": sess,
+                "users": 0,
+                "conversions": rev["conversions"],
+                "revenue": rev["revenue"],
+            }
     print(f"  {len(monthly)} markets, {sum(len(v) for v in monthly.values())} month-market rows")
 
+    # --- Events ---
     print("Querying all events (monthly)...")
     events_q = f"""
         SELECT
@@ -287,34 +339,35 @@ def main():
         event_names.add(row.event_name)
     print(f"  {len(events)} markets, {len(event_names)} distinct events")
 
+    # --- Daily organic sessions + revenue (last 90 days) ---
     print("Querying daily sessions (last 90 days, organic)...")
-    daily_q = f"""
+    daily_sessions_q = f"""
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
-            SUM(CAST(sessions AS INT64)) AS sessions,
-            SUM(CAST(transactions AS INT64)) AS conversions,
-            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `{GA4_TABLE}`
-        WHERE medium = 'organic'
+            SUM(CAST(sessions AS INT64)) AS sessions
+        FROM `{SESSIONS_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'organic'
           AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
         GROUP BY account_name, date
         ORDER BY account_name, date
     """
+    rev_90d = query_revenue_by_date(client, "date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)")
+
     daily = {}
-    for row in client.query(daily_q):
+    for row in client.query(daily_sessions_q):
         market = ACCOUNT_MAP.get(row.account_name)
         if not market:
             continue
+        r = rev_90d.get((market, row.date), {"revenue": 0.0, "conversions": 0})
         daily.setdefault(row.date, {})
         daily[row.date][market] = {
             "sessions": row.sessions,
             "users": 0,
-            "conversions": row.conversions,
-            "revenue": float(row.revenue),
+            "conversions": r["conversions"],
+            "revenue": r["revenue"],
         }
 
-    # Add All Markets totals
     for date in daily:
         totals = {"sessions": 0, "users": 0, "conversions": 0, "revenue": 0.0}
         for m, d in daily[date].items():
