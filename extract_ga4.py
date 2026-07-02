@@ -72,14 +72,17 @@ ACCOUNT_MAP = {
 }
 
 
-def query_revenue_by_date(client, date_filter=""):
+def query_revenue_by_date(client, date_filter="", medium_filter="organic"):
     """Query revenue table and return dict: {(market, date_str): {revenue, conversions}}."""
-    where = f"WHERE {date_filter}" if date_filter else ""
+    conditions = [f"SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = '{medium_filter}'"]
+    if date_filter:
+        conditions.append(date_filter)
+    where = "WHERE " + " AND ".join(conditions)
     q = f"""
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
-            SUM(CAST(totalrevenue AS FLOAT64)) AS revenue,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue,
             SUM(CAST(conversions_purchase AS INT64)) AS conversions
         FROM `{REVENUE_TABLE}`
         {where}
@@ -171,7 +174,8 @@ def build_ai_traffic(client):
     """Build ai_traffic.json: daily + monthly AI-assistant referred traffic."""
     print("\nQuerying AI traffic (medium='ai-assistant')...")
 
-    monthly_q = f"""
+    # --- Monthly sessions by source ---
+    monthly_sessions_q = f"""
         SELECT
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
@@ -182,24 +186,51 @@ def build_ai_traffic(client):
         GROUP BY account_name, month, source
         ORDER BY account_name, month, source
     """
+    # --- Monthly revenue ---
+    monthly_rev_q = f"""
+        SELECT
+            account_name,
+            FORMAT_DATE('%Y-%m', date) AS month,
+            SPLIT(source_medium, ' / ')[SAFE_OFFSET(0)] AS source,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue,
+            SUM(CAST(conversions_purchase AS INT64)) AS conversions
+        FROM `{REVENUE_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'ai-assistant'
+        GROUP BY account_name, month, source
+        ORDER BY account_name, month, source
+    """
+
     monthly = {}
     sources = set()
-    for row in client.query(monthly_q):
+    for row in client.query(monthly_sessions_q):
         market = ACCOUNT_MAP.get(row.account_name)
         if not market:
             continue
         monthly.setdefault(market, {})
         monthly[market].setdefault(row.month, {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}})
         monthly[market][row.month]["sessions"] += row.sessions
-        monthly[market][row.month]["by_source"][row.source] = {
-            "sessions": row.sessions,
-            "conversions": 0,
-            "revenue": 0.0,
-        }
+        monthly[market][row.month]["by_source"].setdefault(row.source, {"sessions": 0, "conversions": 0, "revenue": 0.0})
+        monthly[market][row.month]["by_source"][row.source]["sessions"] += row.sessions
         sources.add(row.source)
+
+    for row in client.query(monthly_rev_q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        monthly.setdefault(market, {})
+        monthly[market].setdefault(row.month, {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}})
+        monthly[market][row.month]["conversions"] += row.conversions
+        monthly[market][row.month]["revenue"] = round(monthly[market][row.month]["revenue"] + float(row.revenue), 2)
+        monthly[market][row.month]["by_source"].setdefault(row.source, {"sessions": 0, "conversions": 0, "revenue": 0.0})
+        monthly[market][row.month]["by_source"][row.source]["conversions"] += row.conversions
+        monthly[market][row.month]["by_source"][row.source]["revenue"] = round(
+            monthly[market][row.month]["by_source"][row.source]["revenue"] + float(row.revenue), 2)
+        sources.add(row.source)
+
     print(f"  Monthly: {len(monthly)} markets, {len(sources)} AI sources: {sorted(sources)}")
 
-    daily_q = f"""
+    # --- Daily sessions by source ---
+    daily_sessions_q = f"""
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
@@ -210,8 +241,22 @@ def build_ai_traffic(client):
         GROUP BY account_name, date, source
         ORDER BY date, account_name, source
     """
+    # --- Daily revenue ---
+    daily_rev_q = f"""
+        SELECT
+            account_name,
+            CAST(date AS STRING) AS date,
+            SPLIT(source_medium, ' / ')[SAFE_OFFSET(0)] AS source,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue,
+            SUM(CAST(conversions_purchase AS INT64)) AS conversions
+        FROM `{REVENUE_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'ai-assistant'
+        GROUP BY account_name, date, source
+        ORDER BY date, account_name, source
+    """
+
     daily = {}
-    for row in client.query(daily_q):
+    for row in client.query(daily_sessions_q):
         market = ACCOUNT_MAP.get(row.account_name)
         if not market:
             continue
@@ -219,16 +264,30 @@ def build_ai_traffic(client):
         if market not in daily[row.date]:
             daily[row.date][market] = {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}}
         daily[row.date][market]["sessions"] += row.sessions
-        daily[row.date][market]["by_source"][row.source] = {
-            "sessions": row.sessions,
-            "conversions": 0,
-            "revenue": 0.0,
-        }
+        daily[row.date][market]["by_source"].setdefault(row.source, {"sessions": 0, "conversions": 0, "revenue": 0.0})
+        daily[row.date][market]["by_source"][row.source]["sessions"] += row.sessions
+
+    for row in client.query(daily_rev_q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        daily.setdefault(row.date, {})
+        if market not in daily[row.date]:
+            daily[row.date][market] = {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}}
+        daily[row.date][market]["conversions"] += row.conversions
+        daily[row.date][market]["revenue"] = round(daily[row.date][market]["revenue"] + float(row.revenue), 2)
+        daily[row.date][market]["by_source"].setdefault(row.source, {"sessions": 0, "conversions": 0, "revenue": 0.0})
+        daily[row.date][market]["by_source"][row.source]["conversions"] += row.conversions
+        daily[row.date][market]["by_source"][row.source]["revenue"] = round(
+            daily[row.date][market]["by_source"][row.source]["revenue"] + float(row.revenue), 2)
 
     for date in daily:
         totals = {"sessions": 0, "conversions": 0, "revenue": 0.0}
         for m, d in daily[date].items():
             totals["sessions"] += d["sessions"]
+            totals["conversions"] += d["conversions"]
+            totals["revenue"] += d["revenue"]
+        totals["revenue"] = round(totals["revenue"], 2)
         daily[date]["All Markets"] = totals
 
     all_months = sorted(set(m for mkt in monthly.values() for m in mkt))
@@ -270,7 +329,7 @@ def main():
         GROUP BY account_name, month
         ORDER BY account_name, month
     """
-    print("Querying monthly revenue...")
+    print("Querying monthly revenue (organic)...")
     revenue_q = f"""
         SELECT
             account_name,
@@ -278,6 +337,7 @@ def main():
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue,
             SUM(CAST(conversions_purchase AS INT64)) AS conversions
         FROM `{REVENUE_TABLE}`
+        WHERE SPLIT(source_medium, ' / ')[SAFE_OFFSET(1)] = 'organic'
         GROUP BY account_name, month
         ORDER BY account_name, month
     """
