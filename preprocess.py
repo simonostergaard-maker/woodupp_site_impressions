@@ -652,6 +652,18 @@ def load_ga4_data():
     return data
 
 
+def load_ai_traffic():
+    """Load AI traffic data (from extract_ga4.py ai-assistant medium)."""
+    path = DATA_DIR / "ai_traffic.json"
+    if not path.exists():
+        print("  ai_traffic.json not found — AI Traffic tab unavailable")
+        return None
+    with open(path) as f:
+        data = json.load(f)
+    print(f"  ai_traffic.json: {len(data.get('months',[]))} months, {len(data.get('daily',{}))} daily dates, {len(data.get('sources',[]))} sources")
+    return data
+
+
 def load_ga4_aggregate():
     """Load ga4.json daily data for per-market conversions/revenue in Dashboard."""
     path = DATA_DIR / "ga4.json"
@@ -1027,7 +1039,7 @@ def generate_html(all_data):
         "overview", "daily_metrics", "anonymized", "url_performance",
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
-        "movers", "monthly_trend", "ga4", "ga4_agg", "brand_analysis",
+        "movers", "monthly_trend", "ga4", "ga4_agg", "brand_analysis", "ai_traffic",
     ]
     lines = []
     for key in data_keys:
@@ -1074,6 +1086,10 @@ def main():
     print("Loading GA4 aggregate data...")
     ga4_agg = load_ga4_aggregate()
 
+    # Load AI traffic data
+    print("Loading AI traffic data...")
+    ai_traffic = load_ai_traffic()
+
     # Process CSV if available
     if csv_path.exists():
         df = load_and_clean(csv_path)
@@ -1113,6 +1129,8 @@ def main():
             all_data["ga4"] = ga4_data
         if ga4_agg:
             all_data["ga4_agg"] = ga4_agg
+        if ai_traffic:
+            all_data["ai_traffic"] = ai_traffic
 
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
@@ -1125,6 +1143,8 @@ def main():
             all_data["ga4"] = ga4_data
         if ga4_agg:
             all_data["ga4_agg"] = ga4_agg
+        if ai_traffic:
+            all_data["ai_traffic"] = ai_traffic
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)

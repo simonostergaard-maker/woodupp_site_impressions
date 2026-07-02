@@ -151,6 +151,7 @@ select:focus, input:focus { border-color: var(--accent); }
   <div class="tab active" data-tab="overview">Dashboard</div>
   <div class="tab" data-tab="analytics">Analytics</div>
   <div class="tab" data-tab="brand">Brand Analysis</div>
+  <div class="tab" data-tab="aitraffic">AI Traffic</div>
   <div class="tab" data-tab="anonymized">Anonymized Queries</div>
   <div class="tab" data-tab="urls">URL Performance</div>
   <div class="tab" data-tab="keywords">Keyword Performance</div>
@@ -380,6 +381,32 @@ select:focus, input:focus { border-color: var(--accent); }
     </div>
   </div>
 
+  <!-- AI TRAFFIC -->
+  <div class="tab-content" id="tab-aitraffic">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="ai-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Period</label>
+        <select id="ai-period-filter">
+          <option value="3">Last 3 months</option>
+          <option value="6" selected>Last 6 months</option>
+          <option value="12">Last 12 months</option>
+          <option value="0">All time</option>
+        </select>
+      </div>
+    </div>
+    <div id="ai-kpis"></div>
+    <div class="grid-2">
+      <div class="card"><h3>AI-Referred Sessions (Monthly)</h3><div class="chart-container" id="chart-ai-sessions"></div></div>
+      <div class="card"><h3>AI-Referred Revenue (Monthly)</h3><div class="chart-container" id="chart-ai-revenue"></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>AI-Referred Conversions (Monthly)</h3><div class="chart-container" id="chart-ai-conversions"></div></div>
+      <div class="card"><h3>Sessions by AI Source</h3><div class="chart-container" id="chart-ai-sources"></div></div>
+    </div>
+    <div class="card"><h3>Daily AI-Referred Sessions</h3><div class="chart-container tall" id="chart-ai-daily"></div></div>
+    <div class="card"><h3>AI Traffic by Market</h3><div class="table-wrap" id="ai-market-table"></div></div>
+  </div>
+
   <!-- MOVERS & SHAKERS -->
   <div class="tab-content" id="tab-movers">
     <div class="filters">
@@ -480,6 +507,9 @@ function initApp() {
   renderBrandAnalysis();
   document.getElementById('brand-market-filter').addEventListener('change', renderBrandAnalysis);
   document.getElementById('brand-period-compare').addEventListener('change', renderBrandAnalysis);
+  renderAITraffic();
+  document.getElementById('ai-market-filter').addEventListener('change', renderAITraffic);
+  document.getElementById('ai-period-filter').addEventListener('change', renderAITraffic);
 }
 
 function populateFilters() {
@@ -505,6 +535,8 @@ function populateFilters() {
   if (ga4Sel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; ga4Sel.appendChild(o); }); }
   const brandSel = document.getElementById('brand-market-filter');
   if (brandSel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; brandSel.appendChild(o); }); }
+  const aiSel = document.getElementById('ai-market-filter');
+  if (aiSel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; aiSel.appendChild(o); }); }
 }
 
 // ═══════════════════════════════════════════
@@ -1774,6 +1806,123 @@ function renderBrandAnalysis() {
   }
   document.getElementById('brand-top-brand').innerHTML = makeQueryTable(bd.top_brand);
   document.getElementById('brand-top-nonbrand').innerHTML = makeQueryTable(bd.top_nonbrand);
+}
+
+// ═══════════════════════════════════════════
+// AI TRAFFIC
+// ═══════════════════════════════════════════
+function renderAITraffic() {
+  const ai = DATA.ai_traffic;
+  if (!ai) {
+    document.getElementById('ai-kpis').innerHTML = '<div class="card" style="color:var(--muted)">AI traffic data not available. Run extract_ga4.py to populate ai_traffic.json.</div>';
+    return;
+  }
+
+  const market = document.getElementById('ai-market-filter').value;
+  const periodVal = parseInt(document.getElementById('ai-period-filter').value);
+  let months = ai.months || [];
+  if (periodVal > 0) months = months.slice(-periodVal);
+
+  function getMonthly(m) {
+    if (m === 'All Markets') {
+      const result = {};
+      months.forEach(mo => {
+        result[mo] = {sessions:0, conversions:0, revenue:0};
+        Object.keys(ai.monthly || {}).forEach(mkt => {
+          const d = ai.monthly[mkt]?.[mo];
+          if (d) { result[mo].sessions+=d.sessions; result[mo].conversions+=d.conversions; result[mo].revenue+=d.revenue; }
+        });
+      });
+      return result;
+    }
+    return ai.monthly?.[m] || {};
+  }
+
+  const mData = getMonthly(market);
+  const filteredMonths = months.filter(m => mData[m]);
+
+  let totalSessions=0, totalConversions=0, totalRevenue=0;
+  filteredMonths.forEach(m => {
+    const d = mData[m];
+    if (d) { totalSessions+=d.sessions; totalConversions+=d.conversions; totalRevenue+=d.revenue; }
+  });
+  const convRate = totalSessions > 0 ? (totalConversions/totalSessions*100).toFixed(2) : '0.00';
+
+  document.getElementById('ai-kpis').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="label">AI Sessions</div><div class="value blue">${fmtN(totalSessions)}</div></div>
+      <div class="kpi"><div class="label">AI Conversions</div><div class="value orange">${fmtN(totalConversions)}</div></div>
+      <div class="kpi"><div class="label">AI Revenue</div><div class="value purple">${fmtCurrency(totalRevenue)}</div></div>
+      <div class="kpi"><div class="label">Conversion Rate</div><div class="value cyan">${convRate}%</div></div>
+    </div>`;
+
+  makeChart('chart-ai-sessions', { type:'bar', data:{labels:filteredMonths, datasets:[
+    {label:'Sessions', data:filteredMonths.map(m=>(mData[m]?.sessions||0)), backgroundColor:'#6366f180', borderColor:'#6366f1', borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  makeChart('chart-ai-revenue', { type:'bar', data:{labels:filteredMonths, datasets:[
+    {label:'Revenue', data:filteredMonths.map(m=>(mData[m]?.revenue||0)), backgroundColor:'#f59e0b80', borderColor:'#f59e0b', borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmtCurrency(v)},grid:{color:'#2a2d3a'}}}}});
+
+  makeChart('chart-ai-conversions', { type:'line', data:{labels:filteredMonths, datasets:[
+    {label:'Conversions', data:filteredMonths.map(m=>(mData[m]?.conversions||0)), borderColor:'#ef4444', backgroundColor:'#ef444420', tension:0.3, borderWidth:2, pointRadius:3, fill:true},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}}}}});
+
+  // Sources breakdown
+  const sources = ai.sources || [];
+  const sourceColors = ['#6366f1','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4','#ec4899','#14b8a6'];
+  const sourceData = sources.map(src => {
+    let total = 0;
+    if (market === 'All Markets') {
+      Object.values(ai.monthly || {}).forEach(mktData => {
+        filteredMonths.forEach(mo => { total += mktData[mo]?.by_source?.[src]?.sessions || 0; });
+      });
+    } else {
+      filteredMonths.forEach(mo => { total += ai.monthly?.[market]?.[mo]?.by_source?.[src]?.sessions || 0; });
+    }
+    return total;
+  });
+  makeChart('chart-ai-sources', { type:'doughnut', data:{labels:sources, datasets:[
+    {data:sourceData, backgroundColor:sourceColors.slice(0,sources.length).map(c=>c+'cc'), borderColor:sourceColors.slice(0,sources.length), borderWidth:1},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{boxWidth:12,color:'#8b8fa3',font:{size:11}}}}}});
+
+  // Daily chart
+  const dailyDates = Object.keys(ai.daily || {}).sort();
+  const dailySessions = dailyDates.map(d => {
+    if (market === 'All Markets') return ai.daily[d]?.['All Markets']?.sessions || 0;
+    return ai.daily[d]?.[market]?.sessions || 0;
+  });
+  const dailyConv = dailyDates.map(d => {
+    if (market === 'All Markets') return ai.daily[d]?.['All Markets']?.conversions || 0;
+    return ai.daily[d]?.[market]?.conversions || 0;
+  });
+  makeChart('chart-ai-daily', { type:'line', data:{labels:dailyDates.map(d=>d.slice(5)), datasets:[
+    {label:'Sessions', data:dailySessions, borderColor:'#6366f1', backgroundColor:'#6366f120', tension:0.3, borderWidth:2, pointRadius:1, fill:true, yAxisID:'y'},
+    {label:'Conversions', data:dailyConv, borderColor:'#22c55e', backgroundColor:'#22c55e20', tension:0.3, borderWidth:2, pointRadius:1, fill:true, yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3',maxTicksLimit:15},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'},title:{display:true,text:'Sessions',color:'#6366f1'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false},title:{display:true,text:'Conversions',color:'#22c55e'}}}}});
+
+  // Market table
+  const latestMonth = months[months.length-1] || '';
+  const prevMonth = months.length >= 2 ? months[months.length-2] : '';
+  const marketNames = Object.keys(ai.monthly || {}).sort((a,b) => {
+    const sa = ai.monthly[a]?.[latestMonth]?.sessions || 0;
+    const sb = ai.monthly[b]?.[latestMonth]?.sessions || 0;
+    return sb - sa;
+  });
+  let tbl = '<table><thead><tr><th>Market</th><th>Sessions</th><th>Conversions</th><th>Revenue</th><th>vs Prev Month</th></tr></thead><tbody>';
+  marketNames.forEach(m => {
+    const curr = ai.monthly[m]?.[latestMonth] || {sessions:0,conversions:0,revenue:0};
+    const prev = ai.monthly[m]?.[prevMonth] || {sessions:0,conversions:0,revenue:0};
+    let sessDelta = '';
+    if (prev.sessions > 0) {
+      const d = ((curr.sessions-prev.sessions)/prev.sessions*100).toFixed(1);
+      const cls = d > 0 ? 'up' : 'down';
+      sessDelta = `<span class="delta ${cls}">${d>0?'+':''}${d}%</span>`;
+    }
+    tbl += `<tr><td>${m}</td><td>${fmtN(curr.sessions)}</td><td>${fmtN(curr.conversions)}</td><td>${fmtCurrency(curr.revenue)}</td><td>${sessDelta}</td></tr>`;
+  });
+  tbl += '</tbody></table>';
+  document.getElementById('ai-market-table').innerHTML = tbl;
 }
 
 // ─── Boot ───

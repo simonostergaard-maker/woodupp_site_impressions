@@ -1,7 +1,8 @@
 """
 Extracts GA4 analytics data from BigQuery and saves to:
-  data/ga4_data.json  — Analytics tab (monthly + last 90 days daily)
+  data/ga4_data.json  — Analytics tab (monthly + last 90 days daily, organic traffic)
   data/ga4.json       — Dashboard tab (2-year daily per-market conversions/revenue)
+  data/ai_traffic.json — AI Traffic tab (monthly + daily, medium='ai-assistant')
 
 Requires: google-cloud-bigquery  (pip install google-cloud-bigquery)
 Auth:      set GOOGLE_APPLICATION_CREDENTIALS or run `gcloud auth application-default login`
@@ -14,8 +15,11 @@ from pathlib import Path
 from google.cloud import bigquery
 
 PROJECT_ID = "obsidian-375910"
+GA4_TABLE = f"{PROJECT_ID}.woodupp.ga4_v3"
+EVENTS_TABLE = f"{PROJECT_ID}.woodupp.ga4_events"
 OUTPUT_PATH = Path(__file__).parent / "data" / "ga4_data.json"
 AGG_OUTPUT_PATH = Path(__file__).parent / "data" / "ga4.json"
+AI_OUTPUT_PATH = Path(__file__).parent / "data" / "ai_traffic.json"
 
 CURRENCY_MAP = {
     "Australia": "AUD",
@@ -65,15 +69,15 @@ ACCOUNT_MAP = {
 def build_ga4_agg(client):
     """Build ga4.json: 2-year daily per-market data for the Dashboard tab."""
     print("Querying full daily history for ga4.json...")
-    q = """
+    q = f"""
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
             SUM(CAST(sessions AS INT64)) AS sessions,
             SUM(CAST(transactions AS INT64)) AS conversions,
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `obsidian-375910.woodupp.ga4_v2`
-        WHERE session_default_channel_group = 'Organic Search'
+        FROM `{GA4_TABLE}`
+        WHERE medium = 'organic'
           AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
         GROUP BY account_name, date
         ORDER BY date, account_name
@@ -131,19 +135,118 @@ def build_ga4_agg(client):
     print(f"  Saved {AGG_OUTPUT_PATH} ({size_mb:.2f} MB)")
 
 
+def build_ai_traffic(client):
+    """Build ai_traffic.json: daily + monthly AI-assistant referred traffic."""
+    print("\nQuerying AI traffic (medium='ai-assistant')...")
+
+    monthly_q = f"""
+        SELECT
+            account_name,
+            FORMAT_DATE('%Y-%m', date) AS month,
+            source,
+            SUM(CAST(sessions AS INT64)) AS sessions,
+            SUM(CAST(transactions AS INT64)) AS conversions,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
+        FROM `{GA4_TABLE}`
+        WHERE medium = 'ai-assistant'
+        GROUP BY account_name, month, source
+        ORDER BY account_name, month, source
+    """
+    monthly = {}
+    sources = set()
+    for row in client.query(monthly_q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        monthly.setdefault(market, {})
+        monthly[market].setdefault(row.month, {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}})
+        monthly[market][row.month]["sessions"] += row.sessions
+        monthly[market][row.month]["conversions"] += row.conversions
+        monthly[market][row.month]["revenue"] = round(monthly[market][row.month]["revenue"] + float(row.revenue), 2)
+        monthly[market][row.month]["by_source"][row.source] = {
+            "sessions": row.sessions,
+            "conversions": row.conversions,
+            "revenue": float(row.revenue),
+        }
+        sources.add(row.source)
+    print(f"  Monthly: {len(monthly)} markets, {len(sources)} AI sources: {sorted(sources)}")
+
+    daily_q = f"""
+        SELECT
+            account_name,
+            CAST(date AS STRING) AS date,
+            source,
+            SUM(CAST(sessions AS INT64)) AS sessions,
+            SUM(CAST(transactions AS INT64)) AS conversions,
+            ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
+        FROM `{GA4_TABLE}`
+        WHERE medium = 'ai-assistant'
+        GROUP BY account_name, date, source
+        ORDER BY date, account_name, source
+    """
+    daily = {}
+    for row in client.query(daily_q):
+        market = ACCOUNT_MAP.get(row.account_name)
+        if not market:
+            continue
+        daily.setdefault(row.date, {})
+        if market not in daily[row.date]:
+            daily[row.date][market] = {"sessions": 0, "conversions": 0, "revenue": 0.0, "by_source": {}}
+        daily[row.date][market]["sessions"] += row.sessions
+        daily[row.date][market]["conversions"] += row.conversions
+        daily[row.date][market]["revenue"] = round(daily[row.date][market]["revenue"] + float(row.revenue), 2)
+        daily[row.date][market]["by_source"][row.source] = {
+            "sessions": row.sessions,
+            "conversions": row.conversions,
+            "revenue": float(row.revenue),
+        }
+
+    for date in daily:
+        totals = {"sessions": 0, "conversions": 0, "revenue": 0.0}
+        for m, d in daily[date].items():
+            totals["sessions"] += d["sessions"]
+            totals["conversions"] += d["conversions"]
+            totals["revenue"] += d["revenue"]
+        totals["revenue"] = round(totals["revenue"], 2)
+        daily[date]["All Markets"] = totals
+
+    all_months = sorted(set(m for mkt in monthly.values() for m in mkt))
+    all_dates = sorted(daily.keys())
+
+    ai_data = {
+        "monthly": monthly,
+        "daily": daily,
+        "months": all_months,
+        "sources": sorted(sources),
+        "date_range": {
+            "min": all_dates[0] if all_dates else "",
+            "max": all_dates[-1] if all_dates else "",
+        },
+    }
+
+    AI_OUTPUT_PATH.parent.mkdir(exist_ok=True)
+    with open(AI_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(ai_data, f, ensure_ascii=False)
+
+    import os
+    size_mb = os.path.getsize(AI_OUTPUT_PATH) / (1024 * 1024)
+    print(f"  {len(all_dates)} daily dates, {len(all_months)} months")
+    print(f"  Saved {AI_OUTPUT_PATH} ({size_mb:.2f} MB)")
+
+
 def main():
     client = bigquery.Client(project=PROJECT_ID)
 
-    print("Querying monthly sessions/revenue...")
-    monthly_q = """
+    print("Querying monthly sessions/revenue (organic)...")
+    monthly_q = f"""
         SELECT
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
             SUM(CAST(sessions AS INT64)) AS sessions,
             SUM(CAST(transactions AS INT64)) AS conversions,
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `obsidian-375910.woodupp.ga4_v2`
-        WHERE session_default_channel_group = 'Organic Search'
+        FROM `{GA4_TABLE}`
+        WHERE medium = 'organic'
         GROUP BY account_name, month
         ORDER BY account_name, month
     """
@@ -162,13 +265,13 @@ def main():
     print(f"  {len(monthly)} markets, {sum(len(v) for v in monthly.values())} month-market rows")
 
     print("Querying all events (monthly)...")
-    events_q = """
+    events_q = f"""
         SELECT
             account_name,
             FORMAT_DATE('%Y-%m', date) AS month,
             event_name,
             SUM(CAST(event_count AS INT64)) AS events
-        FROM `obsidian-375910.woodupp.ga4_events`
+        FROM `{EVENTS_TABLE}`
         GROUP BY account_name, month, event_name
         ORDER BY account_name, month, event_name
     """
@@ -184,16 +287,16 @@ def main():
         event_names.add(row.event_name)
     print(f"  {len(events)} markets, {len(event_names)} distinct events")
 
-    print("Querying daily sessions (last 90 days)...")
-    daily_q = """
+    print("Querying daily sessions (last 90 days, organic)...")
+    daily_q = f"""
         SELECT
             account_name,
             CAST(date AS STRING) AS date,
             SUM(CAST(sessions AS INT64)) AS sessions,
             SUM(CAST(transactions AS INT64)) AS conversions,
             ROUND(SUM(CAST(totalrevenue AS FLOAT64)), 2) AS revenue
-        FROM `obsidian-375910.woodupp.ga4_v2`
-        WHERE session_default_channel_group = 'Organic Search'
+        FROM `{GA4_TABLE}`
+        WHERE medium = 'organic'
           AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
         GROUP BY account_name, date
         ORDER BY account_name, date
@@ -242,10 +345,13 @@ def main():
     import os
     size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
     print(f"\nSaved {OUTPUT_PATH} ({size_mb:.2f} MB)")
-    print(f"Months: {all_months[0]} to {all_months[-1]}")
+    if all_months:
+        print(f"Months: {all_months[0]} to {all_months[-1]}")
 
     print("\nBuilding ga4.json (Dashboard tab)...")
     build_ga4_agg(client)
+
+    build_ai_traffic(client)
 
 
 if __name__ == "__main__":
