@@ -9,6 +9,7 @@ Usage:
 """
 import pandas as pd
 import json
+import re
 import sys
 import os
 from pathlib import Path
@@ -671,16 +672,93 @@ def load_ga4_aggregate():
     return {"daily": compact, "currencies": data.get("currencies", {})}
 
 
-def load_brand_analysis():
-    """Load brand vs non-brand analysis data."""
-    path = DATA_DIR / "brand_analysis.json"
-    if not path.exists():
-        print("  brand_analysis.json not found")
-        return None
-    with open(path) as f:
-        data = json.load(f)
-    print(f"  brand_analysis.json: {len(data.get('daily', {}))} daily dates")
-    return data
+BRAND_RE = re.compile(r"woodupp|wood\s*-?\s*up", re.IGNORECASE)
+
+
+def generate_brand_analysis(df):
+    """Generate brand vs non-brand analysis from the GSC URL impressions data."""
+    kw_df = df[df["query"].notna() & (df["query"] != "")].copy()
+    kw_df["is_brand"] = kw_df["query"].apply(lambda q: bool(BRAND_RE.search(q)))
+    anon_df = df[df["is_anonymized_query"] | df["query"].isna() | (df["query"] == "")]
+
+    brand = kw_df[kw_df["is_brand"]]
+    nonbrand = kw_df[~kw_df["is_brand"]]
+
+    def agg_stats(sub):
+        imp = int(sub["impressions"].sum())
+        clk = int(sub["clicks"].sum())
+        return {
+            "impressions": imp,
+            "clicks": clk,
+            "queries": int(sub["query"].nunique()) if "query" in sub.columns else 0,
+            "avg_position": round(float(sub["sum_position"].sum() / imp), 1) if imp > 0 else 0,
+            "ctr": round(clk / imp * 100, 2) if imp > 0 else 0,
+        }
+
+    overall = {
+        "brand": agg_stats(brand),
+        "nonbrand": agg_stats(nonbrand),
+        "anonymized": {
+            "impressions": int(anon_df["impressions"].sum()),
+            "clicks": int(anon_df["clicks"].sum()),
+        },
+    }
+
+    by_market = {}
+    for market in sorted(kw_df["market"].unique()):
+        m_brand = brand[brand["market"] == market]
+        m_nonbrand = nonbrand[nonbrand["market"] == market]
+        m_anon = anon_df[anon_df["market"] == market]
+        by_market[market] = {
+            "brand": agg_stats(m_brand),
+            "nonbrand": agg_stats(m_nonbrand),
+            "anonymized": {
+                "impressions": int(m_anon["impressions"].sum()),
+                "clicks": int(m_anon["clicks"].sum()),
+            },
+        }
+
+    daily = {}
+    for (date, market), grp in kw_df.groupby(["data_date", "market"]):
+        b = grp[grp["is_brand"]]
+        nb = grp[~grp["is_brand"]]
+        daily.setdefault(date, {})[market] = {
+            "brand": {"impressions": int(b["impressions"].sum()), "clicks": int(b["clicks"].sum())},
+            "nonbrand": {"impressions": int(nb["impressions"].sum()), "clicks": int(nb["clicks"].sum())},
+        }
+
+    brand_agg = brand.groupby("query").agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), markets=("market", "nunique"),
+    ).reset_index()
+    brand_agg["avg_position"] = (brand_agg["sum_position"] / brand_agg["impressions"]).round(1)
+    brand_agg["ctr"] = (brand_agg["clicks"] / brand_agg["impressions"] * 100).round(2)
+    top_brand = brand_agg.nlargest(30, "impressions").apply(
+        lambda r: {"query": r["query"], "impressions": int(r["impressions"]),
+                    "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
+                    "ctr": float(r["ctr"]), "markets": int(r["markets"])}, axis=1).tolist()
+
+    nb_agg = nonbrand.groupby("query").agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), markets=("market", "nunique"),
+    ).reset_index()
+    nb_agg["avg_position"] = (nb_agg["sum_position"] / nb_agg["impressions"]).round(1)
+    nb_agg["ctr"] = (nb_agg["clicks"] / nb_agg["impressions"] * 100).round(2)
+    top_nonbrand = nb_agg.nlargest(30, "impressions").apply(
+        lambda r: {"query": r["query"], "impressions": int(r["impressions"]),
+                    "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
+                    "ctr": float(r["ctr"]), "markets": int(r["markets"])}, axis=1).tolist()
+
+    result = {
+        "overall": overall,
+        "by_market": by_market,
+        "daily": daily,
+        "top_brand": top_brand,
+        "top_nonbrand": top_nonbrand,
+        "brand_pattern": BRAND_RE.pattern + " (case-insensitive)",
+    }
+    print(f"  Brand analysis: {len(daily)} daily dates, {len(by_market)} markets")
+    return result
 
 
 def generate_monthly_trend(df, historical_monthly=None):
@@ -996,10 +1074,6 @@ def main():
     print("Loading GA4 aggregate data...")
     ga4_agg = load_ga4_aggregate()
 
-    # Load brand vs non-brand analysis data
-    print("Loading brand analysis data...")
-    brand_analysis = load_brand_analysis()
-
     # Process CSV if available
     if csv_path.exists():
         df = load_and_clean(csv_path)
@@ -1030,13 +1104,15 @@ def main():
         print("Generating monthly trend...")
         all_data["monthly_trend"] = generate_monthly_trend(df, historical_monthly)
 
+        # Brand vs non-brand analysis (generated from CSV)
+        print("Generating brand analysis...")
+        all_data["brand_analysis"] = generate_brand_analysis(df)
+
         # GA4 analytics
         if ga4_data:
             all_data["ga4"] = ga4_data
         if ga4_agg:
             all_data["ga4_agg"] = ga4_agg
-        if brand_analysis:
-            all_data["brand_analysis"] = brand_analysis
 
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
@@ -1049,8 +1125,6 @@ def main():
             all_data["ga4"] = ga4_data
         if ga4_agg:
             all_data["ga4_agg"] = ga4_agg
-        if brand_analysis:
-            all_data["brand_analysis"] = brand_analysis
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)
