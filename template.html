@@ -629,10 +629,9 @@ function renderOverviewComparison() {
     const monthPrefix = lastDate.slice(0, 7);
     const day = parseInt(lastDate.slice(8, 10));
     periodA = allDates.filter(d => d.startsWith(monthPrefix));
-    const lastDt = new Date(lastDate);
-    const lyYear = lastDt.getFullYear() - 1;
-    const lyMonth = String(lastDt.getMonth() + 1).padStart(2, '0');
-    const lyPrefix = lyYear + '-' + lyMonth;
+    const year = parseInt(monthPrefix.slice(0, 4));
+    const month = monthPrefix.slice(5, 7);
+    const lyPrefix = (year - 1) + '-' + month;
     const lyEnd = lyPrefix + '-' + String(day).padStart(2, '0');
     periodB = allDates.filter(d => d.startsWith(lyPrefix) && d <= lyEnd);
     labelA = `${monthPrefix}-01 to ${lastDate}`;
@@ -642,9 +641,11 @@ function renderOverviewComparison() {
     const monthPrefix = lastDate.slice(0, 7);
     const day = parseInt(lastDate.slice(8, 10));
     periodA = allDates.filter(d => d.startsWith(monthPrefix));
-    const lastDt = new Date(lastDate);
-    const pmDate = new Date(lastDt.getFullYear(), lastDt.getMonth() - 1, 1);
-    const pmPrefix = pmDate.toISOString().slice(0, 7);
+    const year = parseInt(monthPrefix.slice(0, 4));
+    const month = parseInt(monthPrefix.slice(5, 7));
+    const pmYear = month === 1 ? year - 1 : year;
+    const pmMonth = month === 1 ? 12 : month - 1;
+    const pmPrefix = pmYear + '-' + String(pmMonth).padStart(2, '0');
     const pmEnd = pmPrefix + '-' + String(day).padStart(2, '0');
     periodB = allDates.filter(d => d.startsWith(pmPrefix) && d <= pmEnd);
     labelA = `${monthPrefix}-01 to ${lastDate}`;
