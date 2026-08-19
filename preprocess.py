@@ -12,6 +12,7 @@ import json
 import re
 import sys
 import os
+from collections import defaultdict
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -289,7 +290,7 @@ def generate_url_performance(df):
 
     result = {}
     for market in url_agg["market"].unique():
-        mdf = url_agg[url_agg["market"] == market].sort_values("impressions", ascending=False).head(100)
+        mdf = url_agg[url_agg["market"] == market].sort_values("impressions", ascending=False)
         result[market] = [{
             "url": row["url"],
             "path": row["url_path"],
@@ -313,7 +314,7 @@ def generate_url_performance(df):
     ).reset_index()
     url_all_agg["avg_position"] = (url_all_agg["sum_position"] / url_all_agg["impressions"]).round(1)
     url_all_agg["ctr"] = (url_all_agg["clicks"] / url_all_agg["impressions"] * 100).round(2)
-    top_all = url_all_agg.sort_values("impressions", ascending=False).head(200)
+    top_all = url_all_agg.sort_values("impressions", ascending=False)
     result["All Markets"] = [{
         "url": row["url"],
         "path": row["url_path"],
@@ -342,7 +343,7 @@ def generate_keyword_performance(df):
 
     result = {}
     for market in kw_agg["market"].unique():
-        mdf = kw_agg[kw_agg["market"] == market].sort_values("impressions", ascending=False).head(150)
+        mdf = kw_agg[kw_agg["market"] == market].sort_values("impressions", ascending=False)
         result[market] = [{
             "query": row["query"],
             "impressions": int(row["impressions"]),
@@ -361,7 +362,7 @@ def generate_keyword_performance(df):
     ).reset_index()
     kw_all["avg_position"] = (kw_all["sum_position"] / kw_all["impressions"]).round(1)
     kw_all["ctr"] = (kw_all["clicks"] / kw_all["impressions"] * 100).round(2)
-    top_all = kw_all.sort_values("impressions", ascending=False).head(200)
+    top_all = kw_all.sort_values("impressions", ascending=False)
     result["All Markets"] = [{
         "query": row["query"],
         "impressions": int(row["impressions"]),
@@ -572,7 +573,10 @@ def generate_search_features(df):
 
 
 def generate_url_daily(df):
-    top_urls = df.groupby("url")["impressions"].sum().nlargest(50).index.tolist()
+    # Full per-date series for every URL would multiply row count by the number
+    # of dates, so this stays capped (it only feeds the trend-selector dropdown —
+    # the uncapped aggregate picture lives in url_performance / keyword_themes).
+    top_urls = df.groupby("url")["impressions"].sum().nlargest(500).index.tolist()
 
     url_daily = df[df["url"].isin(top_urls)].groupby(["data_date", "url", "market"]).agg(
         impressions=("impressions", "sum"),
@@ -600,7 +604,9 @@ def generate_url_daily(df):
 
 def generate_keyword_daily(df):
     kw_df = df[(~df["is_anonymized_query"]) & (df["query"].notna()) & (df["query"] != "")]
-    top_kws = kw_df.groupby("query")["impressions"].sum().nlargest(50).index.tolist()
+    # Same rationale as generate_url_daily: this only feeds the trend-selector
+    # dropdown, so it stays capped for payload size, not for analytical depth.
+    top_kws = kw_df.groupby("query")["impressions"].sum().nlargest(500).index.tolist()
 
     kw_daily = kw_df[kw_df["query"].isin(top_kws)].groupby(["data_date", "query"]).agg(
         impressions=("impressions", "sum"),
@@ -638,50 +644,6 @@ def load_historical_monthly():
     if dates:
         print(f"  historical_data.json: {min(dates)} to {max(dates)}")
     return data
-
-
-def load_ga4_data():
-    """Load GA4 analytics data (from BigQuery ga4/ga4_events tables)."""
-    path = DATA_DIR / "ga4_data.json"
-    if not path.exists():
-        print("  ga4_data.json not found — Analytics tab unavailable")
-        return None
-    with open(path) as f:
-        data = json.load(f)
-    print(f"  ga4_data.json: {len(data.get('months',[]))} months, {len(data.get('daily',{}))} daily dates")
-    return data
-
-
-def load_ai_traffic():
-    """Load AI traffic data (from extract_ga4.py ai-assistant medium)."""
-    path = DATA_DIR / "ai_traffic.json"
-    if not path.exists():
-        print("  ai_traffic.json not found — AI Traffic tab unavailable")
-        return None
-    with open(path) as f:
-        data = json.load(f)
-    print(f"  ai_traffic.json: {len(data.get('months',[]))} months, {len(data.get('daily',{}))} daily dates, {len(data.get('sources',[]))} sources")
-    return data
-
-
-def load_ga4_aggregate():
-    """Load ga4.json daily data for per-market conversions/revenue in Dashboard."""
-    path = DATA_DIR / "ga4.json"
-    if not path.exists():
-        print("  ga4.json not found — GA4 columns unavailable on Dashboard")
-        return None
-    with open(path) as f:
-        data = json.load(f)
-    raw_daily = data.get("daily", {})
-    # Keep only conversions and revenue to minimise embed size
-    compact = {}
-    for date, markets in raw_daily.items():
-        compact[date] = {
-            m: {"c": v.get("conversions", 0), "r": round(v.get("revenue", 0), 2)}
-            for m, v in markets.items()
-        }
-    print(f"  ga4.json: {len(compact)} daily entries embedded")
-    return {"daily": compact, "currencies": data.get("currencies", {})}
 
 
 BRAND_RE = re.compile(r"woodupp|wood\s*-?\s*up", re.IGNORECASE)
@@ -745,7 +707,7 @@ def generate_brand_analysis(df):
     ).reset_index()
     brand_agg["avg_position"] = (brand_agg["sum_position"] / brand_agg["impressions"]).round(1)
     brand_agg["ctr"] = (brand_agg["clicks"] / brand_agg["impressions"] * 100).round(2)
-    top_brand = brand_agg.nlargest(30, "impressions").apply(
+    top_brand = brand_agg.sort_values("impressions", ascending=False).apply(
         lambda r: {"query": r["query"], "impressions": int(r["impressions"]),
                     "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
                     "ctr": float(r["ctr"]), "markets": int(r["markets"])}, axis=1).tolist()
@@ -756,7 +718,7 @@ def generate_brand_analysis(df):
     ).reset_index()
     nb_agg["avg_position"] = (nb_agg["sum_position"] / nb_agg["impressions"]).round(1)
     nb_agg["ctr"] = (nb_agg["clicks"] / nb_agg["impressions"] * 100).round(2)
-    top_nonbrand = nb_agg.nlargest(30, "impressions").apply(
+    top_nonbrand = nb_agg.sort_values("impressions", ascending=False).apply(
         lambda r: {"query": r["query"], "impressions": int(r["impressions"]),
                     "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
                     "ctr": float(r["ctr"]), "markets": int(r["markets"])}, axis=1).tolist()
@@ -878,12 +840,345 @@ def generate_movers(df):
         "period_recent": period_recent,
         "period_prior": period_prior,
         "split_days": split,
-        "keyword_winners": [kw_rec(r) for _, r in kw_sig.nlargest(50, "imp_change").iterrows()],
-        "keyword_losers": [kw_rec(r) for _, r in kw_sig.nsmallest(50, "imp_change").iterrows()],
-        "url_winners": [url_rec(r) for _, r in url_sig.nlargest(50, "imp_change").iterrows()],
-        "url_losers": [url_rec(r) for _, r in url_sig.nsmallest(50, "imp_change").iterrows()],
-        "pos_gainers": [kw_rec(r) for _, r in pos_sig.nsmallest(50, "pos_change").iterrows()],
-        "pos_losers": [kw_rec(r) for _, r in pos_sig.nlargest(50, "pos_change").iterrows()],
+        "keyword_winners": [kw_rec(r) for _, r in kw_sig.nlargest(300, "imp_change").iterrows()],
+        "keyword_losers": [kw_rec(r) for _, r in kw_sig.nsmallest(300, "imp_change").iterrows()],
+        "url_winners": [url_rec(r) for _, r in url_sig.nlargest(300, "imp_change").iterrows()],
+        "url_losers": [url_rec(r) for _, r in url_sig.nsmallest(300, "imp_change").iterrows()],
+        "pos_gainers": [kw_rec(r) for _, r in pos_sig.nsmallest(300, "pos_change").iterrows()],
+        "pos_losers": [kw_rec(r) for _, r in pos_sig.nlargest(300, "pos_change").iterrows()],
+    }
+
+
+# ─── Keyword Theme / Topic Analysis ───
+#
+# Groups the full (uncapped) keyword set into recurring word/phrase "themes"
+# (e.g. "oak", "dining table", "garden bench") using stopword-filtered
+# unigrams + adjacent-token bigrams — a lightweight n-gram co-occurrence
+# technique that needs no extra ML dependency, so it runs anywhere pandas
+# does. It answers "is this group of keywords trending up, and in which
+# markets" at a level above individual queries, without truncating which
+# keywords are allowed to contribute.
+
+# Purely linguistic function-word lists (no business-word removal) covering
+# WoodUpp's markets, so theme extraction isn't dominated by "the/und/de/og" etc.
+STOPWORDS_EN = {
+    "a","an","the","and","or","but","if","of","at","by","for","with","about","against",
+    "between","into","through","during","before","after","above","below","to","from","up",
+    "down","in","out","on","off","over","under","again","further","then","once","here","there",
+    "when","where","why","how","all","any","both","each","few","more","most","other","some",
+    "such","no","nor","not","only","own","same","so","than","too","very","s","t","can","will",
+    "just","don","should","now","is","are","was","were","be","been","being","have","has","had",
+    "having","do","does","did","doing","i","me","my","we","our","you","your","he","him","his",
+    "she","her","it","its","they","them","their","what","which","who","whom","this","that",
+    "these","those","am","vs","new","best",
+}
+STOPWORDS_DE = {
+    "der","die","das","und","oder","aber","wenn","von","bei","für","mit","gegen","zwischen",
+    "in","durch","während","vor","nach","über","unter","zu","aus","auf","ab","wieder","dann",
+    "hier","da","wann","wo","warum","wie","alle","jede","jeder","jedes","beide","wenige","mehr",
+    "andere","einige","solche","nicht","nur","gleiche","so","als","ist","sind","war","waren",
+    "sein","gewesen","haben","hat","hatte","ich","mich","mein","wir","unser","du","dein","er",
+    "ihm","sie","ihr","ihre","es","ihnen","was","welche","wer","dies","ein","eine","einen",
+    "einem","einer","im","am","zum","zur","den","dem","des","kein","keine","für","neu",
+}
+STOPWORDS_FR = {
+    "le","la","les","un","une","des","et","ou","mais","si","de","à","pour","avec","contre",
+    "entre","dans","par","pendant","avant","après","sur","sous","encore","puis","ici","là",
+    "quand","où","pourquoi","comment","tout","toute","tous","toutes","chaque","plus","autre",
+    "quelque","tel","ne","pas","seulement","même","aussi","très","être","est","sont","était",
+    "étaient","avoir","ai","as","a","ont","je","me","mon","nous","notre","tu","ton","il","lui",
+    "son","elle","sa","ils","elles","leur","ce","cette","ces","qui","que","quoi","du","au","aux",
+    "nouveau","meilleur",
+}
+STOPWORDS_ES = {
+    "el","la","los","las","un","una","unos","unas","y","o","pero","si","de","a","por","para",
+    "con","contra","entre","en","durante","antes","después","sobre","bajo","otra","vez","luego",
+    "aquí","allí","cuando","donde","como","todo","toda","todos","todas","cada","más","otro",
+    "algún","alguna","tal","no","solo","mismo","tan","ser","es","son","era","eran","tener",
+    "tengo","tiene","yo","mi","nosotros","nuestro","tú","tu","él","su","ella","ellos","ellas",
+    "este","esta","estos","estas","que","del","al","por qué","nuevo","mejor",
+}
+STOPWORDS_IT = {
+    "il","lo","la","i","gli","le","un","uno","una","e","o","ma","se","di","a","per","con",
+    "contro","tra","fra","in","durante","prima","dopo","su","sotto","ancora","poi","qui","qua",
+    "là","quando","dove","perché","come","tutto","tutta","tutti","tutte","ogni","più","altro",
+    "alcuni","alcune","tale","non","solo","stesso","così","essere","è","sono","era","erano",
+    "avere","ho","hai","ha","abbiamo","io","mio","noi","nostro","tu","tuo","lui","suo","lei",
+    "loro","questo","questa","questi","queste","che","del","della","dei","delle","nuovo","migliore",
+}
+STOPWORDS_NL = {
+    "de","het","een","en","of","maar","als","van","bij","voor","met","tegen","tussen","in",
+    "door","tijdens","na","boven","onder","naar","uit","op","af","weer","dan","hier","daar",
+    "wanneer","waar","waarom","hoe","alle","elke","beide","weinig","meer","andere","enkele",
+    "zo","niet","alleen","zelfde","zeer","zijn","is","was","hebben","heb","heeft","had","ik",
+    "mijn","wij","ons","jij","jouw","hij","hem","zij","haar","hun","dit","dat","deze","die",
+    "wat","welke","wie","nieuw","beste",
+}
+STOPWORDS_DA = {
+    "den","det","en","et","og","eller","men","hvis","af","ved","for","med","mod","mellem","i",
+    "gennem","under","før","efter","over","til","fra","op","ned","ud","på","igen","så","her",
+    "der","hvornår","hvor","hvorfor","hvordan","alle","hver","begge","mere","andre","nogle",
+    "sådan","ikke","kun","samme","meget","være","er","var","have","har","havde","jeg","mig",
+    "min","vi","vores","du","din","han","ham","hans","hun","hende","hendes","de","dem","deres",
+    "denne","dette","disse","hvad","hvilken","hvem","ny","bedste",
+}
+STOPWORDS_NO = {
+    "den","det","en","et","og","eller","men","hvis","av","ved","for","med","mot","mellom","i",
+    "gjennom","under","før","etter","over","til","fra","opp","ned","ut","på","igjen","så","her",
+    "der","når","hvor","hvorfor","hvordan","alle","hver","begge","mer","andre","noen","slik",
+    "ikke","bare","samme","veldig","være","er","var","ha","har","hadde","jeg","meg","min","vi",
+    "vår","du","din","han","ham","hans","hun","henne","hennes","de","dem","deres","denne",
+    "dette","disse","hva","hvilken","hvem","ny","beste",
+}
+STOPWORDS_SV = {
+    "den","det","en","ett","och","eller","men","om","av","vid","för","med","mot","mellan","i",
+    "genom","under","före","efter","över","till","från","upp","ner","ut","på","igen","så","här",
+    "där","när","var","varför","hur","alla","varje","båda","mer","andra","några","sådan","inte",
+    "bara","samma","mycket","vara","är","ha","har","hade","jag","mig","min","vi","vår","du",
+    "din","han","honom","hans","hon","henne","hennes","de","dem","deras","denna","detta",
+    "dessa","vad","vilken","vem","ny","bästa",
+}
+STOPWORDS_PT = {
+    "o","a","os","as","um","uma","uns","umas","e","ou","mas","se","de","por","para","com",
+    "contra","entre","em","durante","antes","depois","sobre","sob","outra","vez","então","aqui",
+    "ali","quando","onde","porque","como","todo","toda","todos","todas","cada","mais","outro",
+    "algum","alguma","tal","não","apenas","mesmo","tão","ser","é","são","era","eram","ter",
+    "tenho","tem","eu","meu","nós","nosso","tu","teu","ele","seu","ela","sua","eles","elas",
+    "este","esta","estes","estas","que","do","da","dos","das","no","na","novo","melhor",
+}
+STOPWORDS_PL = {
+    "i","oraz","lub","ale","jeśli","z","przy","dla","ze","przeciwko","między","w","przez",
+    "podczas","przed","po","nad","pod","do","od","znowu","wtedy","tutaj","tam","kiedy","gdzie",
+    "dlaczego","jak","wszystko","każdy","oba","więcej","inne","kilka","taki","nie","tylko","tak",
+    "bardzo","być","jest","są","był","była","było","mieć","mam","masz","ma","ja","mój","my",
+    "nasz","ty","twój","on","jego","ona","jej","oni","one","ich","ten","ta","to","te","co",
+    "który","kto","nowy","najlepszy",
+}
+
+STOPWORDS = (
+    STOPWORDS_EN | STOPWORDS_DE | STOPWORDS_FR | STOPWORDS_ES | STOPWORDS_IT | STOPWORDS_NL |
+    STOPWORDS_DA | STOPWORDS_NO | STOPWORDS_SV | STOPWORDS_PT | STOPWORDS_PL
+)
+BRAND_TOKENS = {"woodupp", "woodup"}
+THEME_TOKEN_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+THEME_MIN_QUERIES = 3        # a theme must be shared by at least this many distinct keywords
+THEME_MIN_IMPRESSIONS = 100  # ...and account for at least this many impressions to matter
+THEME_MAX_SAMPLE_KEYWORDS = 150  # per-theme keyword drill-down list — a payload-size guard,
+                                  # not an analysis cutoff (theme totals always use every keyword)
+
+
+def tokenize_query(query):
+    if not isinstance(query, str) or not query:
+        return []
+    toks = THEME_TOKEN_RE.findall(query.lower())
+    return [t for t in toks if len(t) >= 2 and t not in STOPWORDS and t not in BRAND_TOKENS]
+
+
+def theme_candidates(tokens):
+    """Unigrams + adjacent-token bigrams, e.g. ['oak','dining','table'] ->
+    {'oak','dining','table','oak dining','dining table'}."""
+    themes = set(tokens)
+    for i in range(len(tokens) - 1):
+        themes.add(f"{tokens[i]} {tokens[i+1]}")
+    return themes
+
+
+def generate_keyword_themes(df):
+    """Theme-level rollup of every non-anonymized keyword: overall performance,
+    per-market breakdown, weekly trend, and recent-vs-prior movers per
+    theme/market — the deep "is this topic growing, and where" view."""
+    kw_df = df[(~df["is_anonymized_query"]) & df["query"].notna() & (df["query"] != "")].copy()
+    if kw_df.empty:
+        return {"insufficient_data": True}
+
+    unique_queries = kw_df["query"].unique()
+    query_themes = {q: theme_candidates(tokenize_query(q)) for q in unique_queries}
+
+    query_totals = kw_df.groupby("query")["impressions"].sum()
+    theme_support = defaultdict(int)
+    theme_impressions = defaultdict(int)
+    for q, themes in query_themes.items():
+        imp = int(query_totals.get(q, 0))
+        for th in themes:
+            theme_support[th] += 1
+            theme_impressions[th] += imp
+
+    significant = {
+        th for th, cnt in theme_support.items()
+        if cnt >= THEME_MIN_QUERIES and theme_impressions[th] >= THEME_MIN_IMPRESSIONS
+    }
+    if not significant:
+        return {"insufficient_data": True}
+
+    q2themes = {q: [t for t in themes if t in significant] for q, themes in query_themes.items()}
+    q2themes = {q: t for q, t in q2themes.items() if t}
+
+    def explode_by_theme(agg_df):
+        agg_df = agg_df.copy()
+        agg_df["theme"] = agg_df["query"].map(q2themes)
+        agg_df = agg_df[agg_df["theme"].map(bool)]
+        return agg_df.explode("theme")
+
+    # ── Theme x market totals (all dates) ──
+    qm_agg = kw_df.groupby(["query", "market"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"),
+    ).reset_index()
+    exploded_qm = explode_by_theme(qm_agg)
+
+    theme_market = exploded_qm.groupby(["theme", "market"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), keyword_count=("query", "nunique"),
+    ).reset_index()
+    theme_market["avg_position"] = (theme_market["sum_position"] / theme_market["impressions"]).round(1)
+    theme_market["ctr"] = (theme_market["clicks"] / theme_market["impressions"] * 100).round(2)
+    theme_market = theme_market.sort_values("impressions", ascending=False)
+
+    theme_overall = theme_market.groupby("theme").agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), market_count=("market", "nunique"),
+    ).reset_index()
+    kc = exploded_qm.groupby("theme")["query"].nunique().reset_index(name="keyword_count")
+    theme_overall = theme_overall.merge(kc, on="theme")
+    theme_overall["avg_position"] = (theme_overall["sum_position"] / theme_overall["impressions"]).round(1)
+    theme_overall["ctr"] = (theme_overall["clicks"] / theme_overall["impressions"] * 100).round(2)
+    theme_overall = theme_overall.sort_values("impressions", ascending=False)
+
+    themes_out = [{
+        "theme": row["theme"],
+        "type": "phrase" if " " in row["theme"] else "word",
+        "impressions": int(row["impressions"]),
+        "clicks": int(row["clicks"]),
+        "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
+        "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+        "keyword_count": int(row["keyword_count"]),
+        "market_count": int(row["market_count"]),
+    } for _, row in theme_overall.iterrows()]
+
+    theme_market_out = [{
+        "theme": row["theme"], "market": row["market"],
+        "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
+        "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
+        "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+        "keyword_count": int(row["keyword_count"]),
+    } for _, row in theme_market.iterrows()]
+
+    # ── Weekly trend per theme (across all markets) ──
+    kw_df["week"] = pd.to_datetime(kw_df["data_date"]).dt.to_period("W-SUN").apply(
+        lambda p: p.start_time.strftime("%Y-%m-%d"))
+    qw_agg = kw_df.groupby(["query", "week"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"),
+    ).reset_index()
+    theme_week = explode_by_theme(qw_agg).groupby(["theme", "week"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"),
+    ).reset_index()
+    theme_week["avg_position"] = (theme_week["sum_position"] / theme_week["impressions"]).round(1)
+
+    trend_weekly = {}
+    for _, row in theme_week.iterrows():
+        trend_weekly.setdefault(row["theme"], {})[row["week"]] = {
+            "impressions": int(row["impressions"]),
+            "clicks": int(row["clicks"]),
+            "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+        }
+
+    # ── Recent-vs-prior movers, per theme+market and per theme overall ──
+    dates = sorted(kw_df["data_date"].unique())
+    n = len(dates)
+    movers = {"insufficient_data": True}
+    if n >= 14:
+        split = min(28, n // 2)
+        recent_dates = set(dates[-split:])
+        prior_dates = set(dates[-split * 2:-split])
+        if prior_dates:
+            def period_theme_market(date_set):
+                sub = kw_df[kw_df["data_date"].isin(date_set)]
+                agg = sub.groupby(["query", "market"]).agg(
+                    impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+                    sum_position=("sum_position", "sum"),
+                ).reset_index()
+                out = explode_by_theme(agg).groupby(["theme", "market"]).agg(
+                    impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+                    sum_position=("sum_position", "sum"),
+                ).reset_index()
+                out["avg_position"] = (out["sum_position"] / out["impressions"]).round(1)
+                return out
+
+            recent = period_theme_market(recent_dates)
+            prior = period_theme_market(prior_dates)
+            merged = recent.merge(prior, on=["theme", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
+            merged["imp_change"] = (merged["impressions_r"] - merged["impressions_p"]).astype(int)
+            sig = merged[merged["impressions_p"] >= THEME_MIN_IMPRESSIONS]
+
+            def mover_rec(row):
+                pos_r, pos_p = row["avg_position_r"], row["avg_position_p"]
+                return {
+                    "theme": row["theme"], "market": row["market"],
+                    "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
+                    "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+                    "imp_change": int(row["imp_change"]),
+                    "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1)
+                               if row["impressions_p"] > 0 else 0,
+                    "pos_recent": float(pos_r), "pos_prior": float(pos_p),
+                    "pos_change": round(float(pos_r - pos_p), 1) if pos_r > 0 and pos_p > 0 else 0,
+                }
+
+            theme_market_movers = [mover_rec(r) for _, r in sig.sort_values("imp_change", ascending=False).iterrows()]
+
+            overall_sig = sig.groupby("theme").agg(
+                impressions_r=("impressions_r", "sum"), impressions_p=("impressions_p", "sum"),
+                clicks_r=("clicks_r", "sum"), clicks_p=("clicks_p", "sum"),
+            ).reset_index()
+            overall_sig["imp_change"] = (overall_sig["impressions_r"] - overall_sig["impressions_p"]).astype(int)
+            theme_overall_movers = [{
+                "theme": row["theme"],
+                "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
+                "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+                "imp_change": int(row["imp_change"]),
+                "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1)
+                           if row["impressions_p"] > 0 else 0,
+            } for _, row in overall_sig.sort_values("imp_change", ascending=False).iterrows()]
+
+            movers = {
+                "period_recent": f"{min(recent_dates)} to {max(recent_dates)}",
+                "period_prior": f"{min(prior_dates)} to {max(prior_dates)}",
+                "theme_market_movers": theme_market_movers,
+                "theme_overall_movers": theme_overall_movers,
+            }
+
+    # ── Sample keywords per theme for drill-down (capped for payload size only) ──
+    q_totals = kw_df.groupby("query").agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), market_count=("market", "nunique"),
+    ).reset_index()
+    q_totals["avg_position"] = (q_totals["sum_position"] / q_totals["impressions"]).round(1)
+    q_totals["ctr"] = (q_totals["clicks"] / q_totals["impressions"] * 100).round(2)
+    exp_q = explode_by_theme(q_totals)
+
+    keywords_by_theme = {}
+    for theme, grp in exp_q.groupby("theme"):
+        top = grp.sort_values("impressions", ascending=False).head(THEME_MAX_SAMPLE_KEYWORDS)
+        keywords_by_theme[theme] = [{
+            "query": r["query"], "impressions": int(r["impressions"]), "clicks": int(r["clicks"]),
+            "ctr": float(r["ctr"]) if pd.notna(r["ctr"]) else 0,
+            "avg_position": float(r["avg_position"]) if pd.notna(r["avg_position"]) else 0,
+            "market_count": int(r["market_count"]),
+        } for _, r in top.iterrows()]
+
+    print(f"  Keyword themes: {len(themes_out)} significant themes from {len(unique_queries):,} unique keywords")
+
+    return {
+        "generated_from_queries": int(len(unique_queries)),
+        "min_queries_threshold": THEME_MIN_QUERIES,
+        "min_impressions_threshold": THEME_MIN_IMPRESSIONS,
+        "themes": themes_out,
+        "theme_market": theme_market_out,
+        "trend_weekly": trend_weekly,
+        "movers": movers,
+        "keywords_by_theme": keywords_by_theme,
     }
 
 
@@ -1039,7 +1334,7 @@ def generate_html(all_data):
         "overview", "daily_metrics", "anonymized", "url_performance",
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
-        "movers", "monthly_trend", "ga4", "ga4_agg", "brand_analysis", "ai_traffic",
+        "movers", "monthly_trend", "brand_analysis", "keyword_themes",
     ]
     lines = []
     for key in data_keys:
@@ -1078,18 +1373,6 @@ def main():
     print("Loading historical monthly data...")
     historical_monthly = load_historical_monthly()
 
-    # Load GA4 analytics data
-    print("Loading GA4 analytics data...")
-    ga4_data = load_ga4_data()
-
-    # Load GA4 aggregate daily data (for Dashboard per-market columns)
-    print("Loading GA4 aggregate data...")
-    ga4_agg = load_ga4_aggregate()
-
-    # Load AI traffic data
-    print("Loading AI traffic data...")
-    ai_traffic = load_ai_traffic()
-
     # Process CSV if available
     if csv_path.exists():
         df = load_and_clean(csv_path)
@@ -1124,27 +1407,18 @@ def main():
         print("Generating brand analysis...")
         all_data["brand_analysis"] = generate_brand_analysis(df)
 
-        # GA4 analytics
-        if ga4_data:
-            all_data["ga4"] = ga4_data
-        if ga4_agg:
-            all_data["ga4_agg"] = ga4_agg
-        if ai_traffic:
-            all_data["ai_traffic"] = ai_traffic
+        # Keyword theme / topic analysis
+        print("Generating keyword theme analysis...")
+        all_data["keyword_themes"] = generate_keyword_themes(df)
 
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
         all_data = historical
         all_data["movers"] = {"insufficient_data": True}
+        all_data["keyword_themes"] = {"insufficient_data": True}
         all_data["monthly_trend"] = generate_monthly_trend(
             pd.DataFrame(), historical_monthly
         ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
-        if ga4_data:
-            all_data["ga4"] = ga4_data
-        if ga4_agg:
-            all_data["ga4_agg"] = ga4_agg
-        if ai_traffic:
-            all_data["ai_traffic"] = ai_traffic
     else:
         print(f"\nERROR: No CSV found at {csv_path} and no historical data available.")
         sys.exit(1)
