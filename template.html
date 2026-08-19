@@ -181,8 +181,8 @@ select:focus, input:focus { border-color: var(--accent); }
     <div id="overview-comparison"></div>
     <div id="overview-kpis"></div>
     <div class="grid-2">
-      <div class="card"><h3>Daily Impressions by Market</h3><div class="chart-container" id="chart-daily-impressions"></div></div>
       <div class="card"><h3>Daily Clicks by Market</h3><div class="chart-container" id="chart-daily-clicks"></div></div>
+      <div class="card"><h3>Daily Impressions by Market</h3><div class="chart-container" id="chart-daily-impressions"></div></div>
     </div>
     <div class="card" id="card-monthly-trend" style="display:none"><h3>Long-term Monthly Trend <span style="font-size:11px;color:var(--muted);font-weight:400">(faded bars = BigQuery historical data)</span></h3><div class="chart-container tall" id="chart-monthly-trend"></div></div>
     <div class="card"><h3>Market Performance Summary</h3><div class="table-wrap" id="market-summary-table"></div></div>
@@ -215,7 +215,7 @@ select:focus, input:focus { border-color: var(--accent); }
       <div class="filter-group"><label>Market</label><select id="url-market-filter"><option value="All Markets">All Markets</option></select></div>
       <div class="filter-group"><label>Search</label><input type="search" id="url-search" placeholder="Filter URLs..."></div>
       <div class="filter-group"><label>Sort by</label>
-        <select id="url-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
+        <select id="url-sort"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
       </div>
     </div>
     <div class="card"><h3>Top URLs</h3><div class="table-wrap" id="url-table"></div></div>
@@ -231,7 +231,7 @@ select:focus, input:focus { border-color: var(--accent); }
       <div class="filter-group"><label>Market</label><select id="kw-market-filter"><option value="All Markets">All Markets</option></select></div>
       <div class="filter-group"><label>Search</label><input type="search" id="kw-search" placeholder="Filter keywords..."></div>
       <div class="filter-group"><label>Sort by</label>
-        <select id="kw-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
+        <select id="kw-sort"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="ctr">CTR</option><option value="avg_position">Avg Position</option></select>
       </div>
     </div>
     <div id="brand-nonbrand-kpis"></div>
@@ -246,7 +246,7 @@ select:focus, input:focus { border-color: var(--accent); }
   <div class="tab-content" id="tab-countries">
     <div class="filters">
       <div class="filter-group"><label>Sort by</label>
-        <select id="country-sort"><option value="impressions">Impressions</option><option value="clicks">Clicks</option><option value="ctr">CTR</option><option value="anon_pct">Anon %</option></select>
+        <select id="country-sort"><option value="clicks">Clicks</option><option value="impressions">Impressions</option><option value="ctr">CTR</option><option value="anon_pct">Anon %</option></select>
       </div>
     </div>
     <div class="card"><h3>Visitor Countries - Impressions (Top 30)</h3><div class="chart-container tall" id="chart-country-bar"></div></div>
@@ -351,8 +351,8 @@ select:focus, input:focus { border-color: var(--accent); }
       </div>
       <div class="filter-group"><label>Sort by</label>
         <select id="theme-sort">
-          <option value="impressions">Impressions</option>
           <option value="clicks">Clicks</option>
+          <option value="impressions">Impressions</option>
           <option value="ctr">CTR</option>
           <option value="avg_position">Avg Position</option>
           <option value="keyword_count">Keyword Count</option>
@@ -511,8 +511,8 @@ function renderOverview() {
   const t = DATA.overview.totals;
   document.getElementById('overview-kpis').innerHTML = `
     <div class="kpi-row">
-      <div class="kpi"><div class="label">Total Impressions</div><div class="value blue">${fmtN(t.impressions)}</div></div>
       <div class="kpi"><div class="label">Total Clicks</div><div class="value green">${fmtN(t.clicks)}</div></div>
+      <div class="kpi"><div class="label">Total Impressions</div><div class="value blue">${fmtN(t.impressions)}</div></div>
       <div class="kpi"><div class="label">Avg CTR</div><div class="value orange">${t.avg_ctr}%</div></div>
       <div class="kpi"><div class="label">Avg Position</div><div class="value purple">${t.avg_position}</div></div>
       <div class="kpi"><div class="label">Unique Keywords</div><div class="value cyan">${fmtN(t.unique_keywords)}</div></div>
@@ -694,8 +694,8 @@ function renderOverviewComparison() {
   let html = `<div class="comparison-row" style="margin-bottom:16px">
     <div class="comp-card">
       <h4>${labelA} (${periodA.length} days)</h4>
-      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(a.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(a.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(a.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${a.total.ctr}%</span></div>
     </div>
     <div class="vs-badge">VS</div>
@@ -706,19 +706,19 @@ function renderOverviewComparison() {
     html += `<div style="color:var(--muted);padding:12px 0">No comparison data available for this period.</div>`;
   } else {
     html += `
-      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(b.total.impressions)} ${deltaHtml(a.total.impressions,b.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(b.total.clicks)} ${deltaHtml(a.total.clicks,b.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(b.total.impressions)} ${deltaHtml(a.total.impressions,b.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${b.total.ctr}% ${deltaHtml(a.total.ctr,b.total.ctr)}</span></div>`;
   }
   html += `</div></div>`;
 
   if (!noData) {
-    html += `<div class="card" style="margin-bottom:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Imp (Current)</th><th>Imp (Compare)</th><th>Change</th><th>Clicks (Current)</th><th>Clicks (Compare)</th><th>Change</th></tr></thead><tbody>`;
-    const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.impressions||0) - (a.markets[x]?.impressions||0));
+    html += `<div class="card" style="margin-bottom:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Clicks (Current)</th><th>Clicks (Compare)</th><th>Change</th><th>Imp (Current)</th><th>Imp (Compare)</th><th>Change</th></tr></thead><tbody>`;
+    const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.clicks||0) - (a.markets[x]?.clicks||0));
     sortedMarkets.forEach(m => {
       const ma = a.markets[m] || {impressions:0,clicks:0};
       const mb = b.markets[m] || {impressions:0,clicks:0};
-      let row = `<tr><td>${m}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td>`;
+      let row = `<tr><td>${m}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td>`;
       html += row + '</tr>';
     });
     html += '</tbody></table></div></div>';
@@ -829,9 +829,9 @@ function renderUrls() {
   if (search) urls = urls.filter(u => u.url.toLowerCase().includes(search) || (u.path||'').toLowerCase().includes(search));
   urls = [...urls].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
 
-  let html = '<table><thead><tr><th>URL</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>URL</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th></tr></thead><tbody>';
   urls.forEach(u => {
-    html += `<tr><td class="url-cell" title="${u.url}">${u.path||u.url}</td><td>${fmtN(u.impressions)}</td><td>${fmtN(u.clicks)}</td><td>${u.ctr}%</td><td>${u.avg_position}</td></tr>`;
+    html += `<tr><td class="url-cell" title="${u.url}">${u.path||u.url}</td><td>${fmtN(u.clicks)}</td><td>${fmtN(u.impressions)}</td><td>${u.ctr}%</td><td>${u.avg_position}</td></tr>`;
   });
   html += '</tbody></table>';
   document.getElementById('url-table').innerHTML = html;
@@ -856,9 +856,9 @@ document.getElementById('url-trend-select').addEventListener('change', e => {
   const daily = DATA.url_daily[url]?.daily || {};
   const dates = DATA.overview.dates;
   makeChart('chart-url-trend', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
-    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
-    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
-  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
+    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y'},
+    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#22c55e',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#6366f1'},grid:{drawOnChartArea:false}}}}});
 });
 
 // ═══════════════════════════════════════════
@@ -894,9 +894,9 @@ function renderKeywords() {
   if (search) kws = kws.filter(k => k.query.toLowerCase().includes(search));
   kws = [...kws].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
 
-  let html = '<table><thead><tr><th>Keyword</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>URLs</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Keyword</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th><th>URLs</th></tr></thead><tbody>';
   kws.forEach(k => {
-    html += `<tr><td>${k.query}</td><td>${fmtN(k.impressions)}</td><td>${fmtN(k.clicks)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.url_count}</td></tr>`;
+    html += `<tr><td>${k.query}</td><td>${fmtN(k.clicks)}</td><td>${fmtN(k.impressions)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.url_count}</td></tr>`;
   });
   html += '</tbody></table>';
   document.getElementById('kw-table').innerHTML = html;
@@ -919,9 +919,9 @@ document.getElementById('kw-trend-select').addEventListener('change', e => {
   const daily = DATA.keyword_daily[q] || {};
   const dates = DATA.overview.dates;
   makeChart('chart-kw-trend', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:[
-    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
-    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
-  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
+    {label:'Clicks',data:dates.map(d=>daily[d]?.clicks||0),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y'},
+    {label:'Impressions',data:dates.map(d=>daily[d]?.impressions||0),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#22c55e',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#6366f1'},grid:{drawOnChartArea:false}}}}});
 });
 
 // ═══════════════════════════════════════════
@@ -1213,28 +1213,28 @@ function runComparison() {
   <div class="comparison-row">
     <div class="comp-card">
       <h4>Period A: ${labelA} (${periodA.length} days)</h4>
-      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(a.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(a.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(a.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${a.total.ctr}%</span></div>
       <div class="comp-metric"><span class="comp-label">Anonymized %</span><span class="comp-value">${a.total.anon_pct}%</span></div>
     </div>
     <div class="vs-badge">VS</div>
     <div class="comp-card">
       <h4>Period B: ${labelB} (${periodB.length} days)</h4>
-      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(b.total.impressions)} ${deltaHtml(a.total.impressions,b.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">Clicks</span><span class="comp-value">${fmtN(b.total.clicks)} ${deltaHtml(a.total.clicks,b.total.clicks)}</span></div>
+      <div class="comp-metric"><span class="comp-label">Impressions</span><span class="comp-value">${fmtN(b.total.impressions)} ${deltaHtml(a.total.impressions,b.total.impressions)}</span></div>
       <div class="comp-metric"><span class="comp-label">CTR</span><span class="comp-value">${b.total.ctr}% ${deltaHtml(a.total.ctr,b.total.ctr)}</span></div>
       <div class="comp-metric"><span class="comp-label">Anonymized %</span><span class="comp-value">${b.total.anon_pct}%</span></div>
     </div>
   </div>`;
 
   // Per-market comparison table
-  html += '<div class="card" style="margin-top:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Imp (A)</th><th>Imp (B)</th><th>Change</th><th>Clicks (A)</th><th>Clicks (B)</th><th>Change</th></tr></thead><tbody>';
-  const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.impressions||0) - (a.markets[x]?.impressions||0));
+  html += '<div class="card" style="margin-top:16px"><h3>Per-Market Comparison</h3><div class="table-wrap"><table><thead><tr><th>Market</th><th>Clicks (A)</th><th>Clicks (B)</th><th>Change</th><th>Imp (A)</th><th>Imp (B)</th><th>Change</th></tr></thead><tbody>';
+  const sortedMarkets = markets.sort((x,y) => (a.markets[y]?.clicks||0) - (a.markets[x]?.clicks||0));
   sortedMarkets.forEach(m => {
     const ma = a.markets[m] || {impressions:0,clicks:0};
     const mb = b.markets[m] || {impressions:0,clicks:0};
-    html += `<tr><td>${m}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td></tr>`;
+    html += `<tr><td>${m}</td><td>${fmtN(ma.clicks)}</td><td>${fmtN(mb.clicks)}</td><td>${deltaHtml(ma.clicks,mb.clicks)}</td><td>${fmtN(ma.impressions)}</td><td>${fmtN(mb.impressions)}</td><td>${deltaHtml(ma.impressions,mb.impressions)}</td></tr>`;
   });
   html += '</tbody></table></div></div>';
 
@@ -1297,15 +1297,16 @@ function renderMovers() {
   function kwTable(items, isWinner) {
     const rows = filterMarket(items);
     if (!rows.length) return '<p style="color:var(--muted);padding:10px">No data</p>';
-    let h = '<table><thead><tr><th>Keyword</th><th>Market</th><th>Imp (Recent)</th><th>Imp (Prior)</th><th>Change</th><th>% Change</th><th>Pos (Recent)</th><th>Pos Δ</th></tr></thead><tbody>';
+    let h = '<table><thead><tr><th>Keyword</th><th>Market</th><th>Clicks (Recent)</th><th>Clicks (Prior)</th><th>Change</th><th>% Change</th><th>Impressions</th><th>Pos (Recent)</th><th>Pos Δ</th></tr></thead><tbody>';
     rows.forEach(k => {
-      const impCls = isWinner ? 'delta up' : 'delta down';
+      const cls = isWinner ? 'delta up' : 'delta down';
       const posCls = k.pos_change < 0 ? 'delta up' : 'delta down';
       h += `<tr>
         <td>${k.query}</td><td style="color:var(--muted)">${k.market}</td>
-        <td>${fmtN(k.imp_recent)}</td><td>${fmtN(k.imp_prior)}</td>
-        <td><span class="${impCls}">${isWinner?'+':''}${fmtN(k.imp_change)}</span></td>
-        <td><span class="${impCls}">${k.imp_pct > 0 ? '+' : ''}${k.imp_pct}%</span></td>
+        <td>${fmtN(k.clicks_recent)}</td><td>${fmtN(k.clicks_prior)}</td>
+        <td><span class="${cls}">${isWinner?'+':''}${fmtN(k.clicks_change)}</span></td>
+        <td><span class="${cls}">${k.clicks_pct > 0 ? '+' : ''}${k.clicks_pct}%</span></td>
+        <td>${fmtN(k.imp_recent)}</td>
         <td>${k.pos_recent||'-'}</td>
         <td><span class="${posCls}">${k.pos_change > 0 ? '+' : ''}${k.pos_change}</span></td>
       </tr>`;
@@ -1316,15 +1317,16 @@ function renderMovers() {
   function urlTable(items, isWinner) {
     const rows = filterMarket(items);
     if (!rows.length) return '<p style="color:var(--muted);padding:10px">No data</p>';
-    let h = '<table><thead><tr><th>URL</th><th>Market</th><th>Imp (Recent)</th><th>Imp (Prior)</th><th>Change</th><th>% Change</th></tr></thead><tbody>';
+    let h = '<table><thead><tr><th>URL</th><th>Market</th><th>Clicks (Recent)</th><th>Clicks (Prior)</th><th>Change</th><th>% Change</th><th>Impressions</th></tr></thead><tbody>';
     rows.forEach(u => {
       const cls = isWinner ? 'delta up' : 'delta down';
       h += `<tr>
         <td class="url-cell" title="${u.url}">${u.path||u.url}</td>
         <td style="color:var(--muted)">${u.market}</td>
-        <td>${fmtN(u.imp_recent)}</td><td>${fmtN(u.imp_prior)}</td>
-        <td><span class="${cls}">${isWinner?'+':''}${fmtN(u.imp_change)}</span></td>
-        <td><span class="${cls}">${u.imp_pct > 0 ? '+' : ''}${u.imp_pct}%</span></td>
+        <td>${fmtN(u.clicks_recent)}</td><td>${fmtN(u.clicks_prior)}</td>
+        <td><span class="${cls}">${isWinner?'+':''}${fmtN(u.clicks_change)}</span></td>
+        <td><span class="${cls}">${u.clicks_pct > 0 ? '+' : ''}${u.clicks_pct}%</span></td>
+        <td>${fmtN(u.imp_recent)}</td>
       </tr>`;
     });
     return h + '</tbody></table>';
@@ -1400,13 +1402,13 @@ function renderThemes() {
       <div class="kpi"><div class="label">Min Support</div><div class="value" style="font-size:13px;color:var(--muted);line-height:1.4">&ge;${kt.min_queries_threshold} keywords &amp;<br>&ge;${fmtN(kt.min_impressions_threshold)} impressions</div></div>
     </div>`;
 
-  let html = '<table><thead><tr><th>Theme</th><th>Type</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th>' +
+  let html = '<table><thead><tr><th>Theme</th><th>Type</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th><th>Keywords</th>' +
     (market === 'All Markets' ? '<th>Markets</th>' : '') + '</tr></thead><tbody>';
   rows.forEach(r => {
     const type = typeOf(r.theme);
     html += `<tr class="theme-row" data-theme="${r.theme}" style="cursor:pointer">
       <td>${r.theme}</td><td><span class="badge ${type==='phrase'?'badge-blue':'badge-orange'}">${type}</span></td>
-      <td>${fmtN(r.impressions)}</td><td>${fmtN(r.clicks)}</td><td>${r.ctr}%</td><td>${r.avg_position}</td><td>${fmtN(r.keyword_count)}</td>
+      <td>${fmtN(r.clicks)}</td><td>${fmtN(r.impressions)}</td><td>${r.ctr}%</td><td>${r.avg_position}</td><td>${fmtN(r.keyword_count)}</td>
       ${market === 'All Markets' ? `<td>${r.market_count}</td>` : ''}
     </tr>`;
   });
@@ -1423,12 +1425,13 @@ function renderThemes() {
   function moverTable(list, isUp) {
     if (!list.length) return '<p style="color:var(--muted);padding:10px">No significant movers</p>';
     let h = '<table><thead><tr><th>Theme</th>' + (market === 'All Markets' ? '' : '<th>Market</th>') +
-      '<th>Imp (Recent)</th><th>Imp (Prior)</th><th>% Change</th></tr></thead><tbody>';
+      '<th>Clicks (Recent)</th><th>Clicks (Prior)</th><th>% Change</th><th>Impressions</th></tr></thead><tbody>';
     list.forEach(r => {
       const cls = isUp ? 'delta up' : 'delta down';
       h += `<tr><td>${r.theme}</td>${market === 'All Markets' ? '' : `<td style="color:var(--muted)">${r.market}</td>`}
-        <td>${fmtN(r.imp_recent)}</td><td>${fmtN(r.imp_prior)}</td>
-        <td><span class="${cls}">${r.imp_pct>0?'+':''}${r.imp_pct}%</span></td></tr>`;
+        <td>${fmtN(r.clicks_recent)}</td><td>${fmtN(r.clicks_prior)}</td>
+        <td><span class="${cls}">${r.clicks_pct>0?'+':''}${r.clicks_pct}%</span></td>
+        <td>${fmtN(r.imp_recent)}</td></tr>`;
     });
     return h + '</tbody></table>';
   }
@@ -1437,8 +1440,8 @@ function renderThemes() {
     upEl.innerHTML = msg; downEl.innerHTML = msg;
   } else {
     const source = market === 'All Markets' ? mv.theme_overall_movers : mv.theme_market_movers.filter(r => r.market === market);
-    const up = [...source].sort((a,b)=>b.imp_pct-a.imp_pct).slice(0,25);
-    const down = [...source].sort((a,b)=>a.imp_pct-b.imp_pct).slice(0,25);
+    const up = [...source].sort((a,b)=>b.clicks_pct-a.clicks_pct).slice(0,25);
+    const down = [...source].sort((a,b)=>a.clicks_pct-b.clicks_pct).slice(0,25);
     upEl.innerHTML = moverTable(up, true);
     downEl.innerHTML = moverTable(down, false);
   }
@@ -1465,8 +1468,8 @@ function selectTheme(theme) {
   if (overall) {
     document.getElementById('theme-detail-kpis').innerHTML = `
       <div class="kpi-row" style="margin:12px 0">
-        <div class="kpi"><div class="label">Impressions</div><div class="value blue">${fmtN(overall.impressions)}</div></div>
         <div class="kpi"><div class="label">Clicks</div><div class="value green">${fmtN(overall.clicks)}</div></div>
+        <div class="kpi"><div class="label">Impressions</div><div class="value blue">${fmtN(overall.impressions)}</div></div>
         <div class="kpi"><div class="label">CTR</div><div class="value cyan">${overall.ctr}%</div></div>
         <div class="kpi"><div class="label">Avg Position</div><div class="value orange">${overall.avg_position}</div></div>
         <div class="kpi"><div class="label">Keywords</div><div class="value purple">${fmtN(overall.keyword_count)}</div></div>
@@ -1477,19 +1480,19 @@ function selectTheme(theme) {
   const weekly = (kt.trend_weekly && kt.trend_weekly[theme]) || {};
   const weeks = Object.keys(weekly).sort();
   makeChart('chart-theme-trend', { type:'line', data:{labels:weeks.map(w=>w.slice(5)),datasets:[
-    {label:'Impressions',data:weeks.map(w=>weekly[w].impressions),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y'},
-    {label:'Clicks',data:weeks.map(w=>weekly[w].clicks),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y1'},
-  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#6366f1'},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#22c55e'},grid:{drawOnChartArea:false}}}}});
+    {label:'Clicks',data:weeks.map(w=>weekly[w].clicks),borderColor:'#22c55e',backgroundColor:'#22c55e20',fill:true,tension:0.3,yAxisID:'y'},
+    {label:'Impressions',data:weeks.map(w=>weekly[w].impressions),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,yAxisID:'y1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{type:'linear',position:'left',ticks:{color:'#22c55e'},grid:{color:'#2a2d3a'}},y1:{type:'linear',position:'right',ticks:{color:'#6366f1'},grid:{drawOnChartArea:false}}}}});
 
-  const topMarkets = kt.theme_market.filter(r => r.theme === theme).sort((a,b)=>b.impressions-a.impressions).slice(0,15);
+  const topMarkets = kt.theme_market.filter(r => r.theme === theme).sort((a,b)=>b.clicks-a.clicks).slice(0,15);
   makeChart('chart-theme-markets', { type:'bar', data:{labels:topMarkets.map(m=>m.market),datasets:[
-    {label:'Impressions',data:topMarkets.map(m=>m.impressions),backgroundColor:'#6366f1'},
+    {label:'Clicks',data:topMarkets.map(m=>m.clicks),backgroundColor:'#22c55e'},
   ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3'},grid:{display:false}}}}});
 
   const kws = (kt.keywords_by_theme && kt.keywords_by_theme[theme]) || [];
-  let html = '<table><thead><tr><th>Keyword</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th>Avg Pos</th><th>Markets</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Keyword</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th><th>Markets</th></tr></thead><tbody>';
   kws.forEach(k => {
-    html += `<tr><td>${k.query}</td><td>${fmtN(k.impressions)}</td><td>${fmtN(k.clicks)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.market_count}</td></tr>`;
+    html += `<tr><td>${k.query}</td><td>${fmtN(k.clicks)}</td><td>${fmtN(k.impressions)}</td><td>${k.ctr}%</td><td>${k.avg_position}</td><td>${k.market_count}</td></tr>`;
   });
   html += '</tbody></table>';
   document.getElementById('theme-detail-keywords').innerHTML = html;

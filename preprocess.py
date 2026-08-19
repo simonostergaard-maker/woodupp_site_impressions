@@ -816,6 +816,7 @@ def generate_movers(df):
     kw_p = agg_kw(prior_dates)
     kw_m = kw_r.merge(kw_p, on=["query", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
     kw_m["imp_change"] = (kw_m["impressions_r"] - kw_m["impressions_p"]).astype(int)
+    kw_m["clicks_change"] = (kw_m["clicks_r"] - kw_m["clicks_p"]).astype(int)
     kw_m["pos_change"] = (kw_m["avg_position_r"] - kw_m["avg_position_p"]).round(1)
     kw_sig = kw_m[kw_m["impressions_p"] >= 50]
 
@@ -831,13 +832,16 @@ def generate_movers(df):
     url_p = agg_url(prior_dates)
     url_m = url_r.merge(url_p, on=["url", "url_path", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
     url_m["imp_change"] = (url_m["impressions_r"] - url_m["impressions_p"]).astype(int)
+    url_m["clicks_change"] = (url_m["clicks_r"] - url_m["clicks_p"]).astype(int)
     url_sig = url_m[url_m["impressions_p"] >= 100]
 
     def kw_rec(row):
         return {
             "query": row["query"], "market": row["market"],
-            "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
             "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+            "clicks_change": int(row["clicks_change"]),
+            "clicks_pct": round((row["clicks_r"] - row["clicks_p"]) / row["clicks_p"] * 100, 1) if row["clicks_p"] > 0 else 0,
+            "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
             "imp_change": int(row["imp_change"]),
             "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1) if row["impressions_p"] > 0 else 0,
             "pos_recent": float(row["avg_position_r"]), "pos_prior": float(row["avg_position_p"]),
@@ -847,22 +851,26 @@ def generate_movers(df):
     def url_rec(row):
         return {
             "url": row["url"], "path": row["url_path"], "market": row["market"],
-            "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
             "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+            "clicks_change": int(row["clicks_change"]),
+            "clicks_pct": round((row["clicks_r"] - row["clicks_p"]) / row["clicks_p"] * 100, 1) if row["clicks_p"] > 0 else 0,
+            "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
             "imp_change": int(row["imp_change"]),
             "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1) if row["impressions_p"] > 0 else 0,
         }
 
     pos_sig = kw_sig[(kw_sig["avg_position_p"] > 0) & (kw_sig["avg_position_r"] > 0)]
 
+    # Ranked by click change (the primary/default lens) rather than impressions —
+    # impression swings without click swings are much less actionable.
     return {
         "period_recent": period_recent,
         "period_prior": period_prior,
         "split_days": split,
-        "keyword_winners": [kw_rec(r) for _, r in kw_sig.nlargest(300, "imp_change").iterrows()],
-        "keyword_losers": [kw_rec(r) for _, r in kw_sig.nsmallest(300, "imp_change").iterrows()],
-        "url_winners": [url_rec(r) for _, r in url_sig.nlargest(300, "imp_change").iterrows()],
-        "url_losers": [url_rec(r) for _, r in url_sig.nsmallest(300, "imp_change").iterrows()],
+        "keyword_winners": [kw_rec(r) for _, r in kw_sig.nlargest(300, "clicks_change").iterrows()],
+        "keyword_losers": [kw_rec(r) for _, r in kw_sig.nsmallest(300, "clicks_change").iterrows()],
+        "url_winners": [url_rec(r) for _, r in url_sig.nlargest(300, "clicks_change").iterrows()],
+        "url_losers": [url_rec(r) for _, r in url_sig.nsmallest(300, "clicks_change").iterrows()],
         "pos_gainers": [kw_rec(r) for _, r in pos_sig.nsmallest(300, "pos_change").iterrows()],
         "pos_losers": [kw_rec(r) for _, r in pos_sig.nlargest(300, "pos_change").iterrows()],
     }
@@ -1149,14 +1157,17 @@ def generate_keyword_themes(df):
                 pos_r, pos_p = avg_pos(sp_r, imp_r), avg_pos(sp_p, imp_p)
                 return {
                     "theme": theme, "market": market,
-                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
                     "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+                    "clicks_change": int(clk_r - clk_p),
+                    "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else 0,
+                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
                     "imp_change": int(imp_r - imp_p),
                     "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
                     "pos_recent": float(pos_r), "pos_prior": float(pos_p),
                     "pos_change": round(pos_r - pos_p, 1) if pos_r > 0 and pos_p > 0 else 0,
                 }
 
+            # Ranked by click change (the primary/default lens), not impressions.
             zero = [0, 0, 0.0, 0]
             theme_market_movers = []
             for key in set(recent_stats) | set(prior_stats):
@@ -1165,7 +1176,7 @@ def generate_keyword_themes(df):
                 if p[0] < THEME_MIN_IMPRESSIONS:
                     continue
                 theme_market_movers.append(mover_rec(theme, market, recent_stats.get(key, zero), p))
-            theme_market_movers.sort(key=lambda r: r["imp_change"], reverse=True)
+            theme_market_movers.sort(key=lambda r: r["clicks_change"], reverse=True)
 
             recent_by_theme = rollup_by_theme(recent_stats)
             prior_by_theme = rollup_by_theme(prior_stats)
@@ -1179,12 +1190,14 @@ def generate_keyword_themes(df):
                     continue
                 theme_overall_movers.append({
                     "theme": theme,
-                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
                     "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+                    "clicks_change": int(clk_r - clk_p),
+                    "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else 0,
+                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
                     "imp_change": int(imp_r - imp_p),
                     "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
                 })
-            theme_overall_movers.sort(key=lambda r: r["imp_change"], reverse=True)
+            theme_overall_movers.sort(key=lambda r: r["clicks_change"], reverse=True)
 
             movers = {
                 "period_recent": f"{min(recent_dates)} to {max(recent_dates)}",
