@@ -5,7 +5,6 @@ __pycache__/
 # Raw data files — never commit to repo
 *.csv
 data/historical_data.json
-data/ga4_data.json
 
 # Local environment
 .env
