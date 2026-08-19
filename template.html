@@ -360,9 +360,18 @@ select:focus, input:focus { border-color: var(--accent); }
       </div>
     </div>
     <div id="theme-kpis"></div>
+    <div class="filters" style="margin-bottom:8px">
+      <div class="filter-group"><label>Trend Period</label>
+        <select id="theme-trend-period">
+          <option value="rolling">Rolling (most recent period)</option>
+          <option value="mom">Last Full Month vs Previous Month</option>
+        </select>
+      </div>
+      <div class="filter-group"><label>&nbsp;</label><span id="theme-trend-period-label" style="font-size:12px;color:var(--muted);padding-top:7px"></span></div>
+    </div>
     <div class="grid-2">
-      <div class="card"><h3>&#x1F4C8; Top Trending Up (last vs prior period)</h3><div class="table-wrap" id="theme-trending-up"></div></div>
-      <div class="card"><h3>&#x1F4C9; Top Trending Down (last vs prior period)</h3><div class="table-wrap" id="theme-trending-down"></div></div>
+      <div class="card"><h3>&#x1F4C8; Top Trending Up</h3><div class="table-wrap" id="theme-trending-up"></div></div>
+      <div class="card"><h3>&#x1F4C9; Top Trending Down</h3><div class="table-wrap" id="theme-trending-down"></div></div>
     </div>
     <div class="card"><h3>All Themes</h3><div class="table-wrap" id="theme-table"></div></div>
     <div class="card">
@@ -386,6 +395,12 @@ select:focus, input:focus { border-color: var(--accent); }
           <option value="keywords">Keywords</option>
           <option value="urls">URLs</option>
           <option value="positions">Positions</option>
+        </select>
+      </div>
+      <div class="filter-group"><label>Period</label>
+        <select id="movers-period-filter">
+          <option value="rolling">Rolling (most recent period)</option>
+          <option value="mom">Last Full Month vs Previous Month</option>
         </select>
       </div>
     </div>
@@ -477,6 +492,7 @@ function initApp() {
   document.getElementById('theme-sort').addEventListener('change', renderThemes);
   document.getElementById('theme-search').addEventListener('input', renderThemes);
   document.getElementById('theme-type-filter').addEventListener('change', renderThemes);
+  document.getElementById('theme-trend-period').addEventListener('change', renderThemes);
 }
 
 function populateFilters() {
@@ -1279,16 +1295,23 @@ function renderSerpFeatures() {
 // TAB 10: MOVERS & SHAKERS
 // ═══════════════════════════════════════════
 function renderMovers() {
-  const m = DATA.movers;
+  const period = document.getElementById('movers-period-filter').value;
   const market = document.getElementById('movers-market-filter').value;
+  const rolling = DATA.movers;
+  const m = period === 'mom' ? rolling?.calendar_mom : rolling;
 
   if (!m || m.insufficient_data) {
-    document.getElementById('movers-period-label').innerHTML = 'Need at least 14 days of data for mover analysis.';
+    document.getElementById('movers-period-label').innerHTML = period === 'mom'
+      ? 'Need at least two full calendar months of data for a month-over-month comparison.'
+      : 'Need at least 14 days of data for mover analysis.';
+    ['movers-kw-winners','movers-kw-losers','movers-url-winners','movers-url-losers','movers-pos-gainers','movers-pos-losers']
+      .forEach(id => document.getElementById(id).innerHTML = '');
     return;
   }
 
-  document.getElementById('movers-period-label').innerHTML =
-    `Comparing <strong>${m.period_recent}</strong> vs <strong>${m.period_prior}</strong> &nbsp;|&nbsp; ${m.split_days}-day periods &nbsp;|&nbsp; Minimum 50 impressions (keywords) / 100 impressions (URLs) in prior period`;
+  document.getElementById('movers-period-label').innerHTML = period === 'mom'
+    ? `Comparing <strong>${m.period_current}</strong> vs <strong>${m.period_prior}</strong> (calendar months) &nbsp;|&nbsp; Minimum 50 impressions (keywords) / 100 impressions (URLs) in prior period`
+    : `Comparing <strong>${m.period_recent}</strong> vs <strong>${m.period_prior}</strong> &nbsp;|&nbsp; ${m.split_days}-day periods &nbsp;|&nbsp; Minimum 50 impressions (keywords) / 100 impressions (URLs) in prior period`;
 
   function filterMarket(items) {
     return market === 'all' ? items : items.filter(i => i.market === market);
@@ -1357,6 +1380,7 @@ function renderMovers() {
 }
 
 document.getElementById('movers-market-filter').addEventListener('change', renderMovers);
+document.getElementById('movers-period-filter').addEventListener('change', renderMovers);
 document.getElementById('movers-view-filter').addEventListener('change', e => {
   const v = e.target.value;
   document.getElementById('movers-keywords-section').style.display = v==='keywords' ? '' : 'none';
@@ -1418,8 +1442,9 @@ function renderThemes() {
     tr.addEventListener('click', () => selectTheme(tr.dataset.theme));
   });
 
-  // Trending up / down, respecting the market filter
-  const mv = kt.movers;
+  // Trending up / down, respecting the market filter and trend-period toggle
+  const trendPeriod = document.getElementById('theme-trend-period').value;
+  const mv = trendPeriod === 'mom' ? kt.calendar_mom : kt.movers;
   const upEl = document.getElementById('theme-trending-up');
   const downEl = document.getElementById('theme-trending-down');
   function moverTable(list, isUp) {
@@ -1435,15 +1460,22 @@ function renderThemes() {
     });
     return h + '</tbody></table>';
   }
+  const periodLabelEl = document.getElementById('theme-trend-period-label');
   if (!mv || mv.insufficient_data) {
-    const msg = '<p style="color:var(--muted);padding:10px">Need at least 14 days of data for trend comparison.</p>';
+    const msg = trendPeriod === 'mom'
+      ? '<p style="color:var(--muted);padding:10px">Need at least two full calendar months of data for a month-over-month comparison.</p>'
+      : '<p style="color:var(--muted);padding:10px">Need at least 14 days of data for trend comparison.</p>';
     upEl.innerHTML = msg; downEl.innerHTML = msg;
+    if (periodLabelEl) periodLabelEl.textContent = '';
   } else {
     const source = market === 'All Markets' ? mv.theme_overall_movers : mv.theme_market_movers.filter(r => r.market === market);
     const up = [...source].sort((a,b)=>b.clicks_pct-a.clicks_pct).slice(0,25);
     const down = [...source].sort((a,b)=>a.clicks_pct-b.clicks_pct).slice(0,25);
     upEl.innerHTML = moverTable(up, true);
     downEl.innerHTML = moverTable(down, false);
+    if (periodLabelEl) {
+      periodLabelEl.textContent = trendPeriod === 'mom' ? `${mv.period_current} vs ${mv.period_prior}` : `${mv.period_recent} vs ${mv.period_prior}`;
+    }
   }
 
   // Populate the detail selector once, and show a default theme on first render

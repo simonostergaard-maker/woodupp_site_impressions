@@ -786,6 +786,24 @@ def generate_monthly_trend(df, historical_monthly=None):
     return {"months": sorted(all_markets.keys()), "all_markets": all_markets, "by_market": by_market}
 
 
+def calendar_mom_dates(dates):
+    """Return (current_month_dates, prior_month_dates, current_label, prior_label)
+    for 'last full calendar month vs the month before it' — the same
+    momFull semantics as the Dashboard tab's comparison preset, so a
+    keyword/theme MoM view lines up with the overall market MoM numbers.
+    None if there isn't a full prior month in range."""
+    last_date = pd.Timestamp(dates[-1])
+    last_full_month_start = last_date.replace(day=1) - pd.DateOffset(months=1)
+    prev_month_start = last_full_month_start - pd.DateOffset(months=1)
+    last_full_month = last_full_month_start.strftime("%Y-%m")
+    prev_month = prev_month_start.strftime("%Y-%m")
+    current_dates = {d for d in dates if d.startswith(last_full_month)}
+    prior_dates = {d for d in dates if d.startswith(prev_month)}
+    if not current_dates or not prior_dates:
+        return None
+    return current_dates, prior_dates, last_full_month, prev_month
+
+
 def generate_movers(df):
     """Identify keyword and URL winners/losers between two equal recent periods."""
     dates = sorted(df["data_date"].unique())
@@ -861,6 +879,39 @@ def generate_movers(df):
 
     pos_sig = kw_sig[(kw_sig["avg_position_p"] > 0) & (kw_sig["avg_position_r"] > 0)]
 
+    # Calendar-aligned "last full month vs previous month" view, alongside the
+    # rolling one above — lines up with the Dashboard tab's own MoM preset so
+    # "what keywords/URLs drove this market's MoM change" has a real answer.
+    # (True YoY isn't possible: the source data only covers ~6 months.)
+    calendar_mom = {"insufficient_data": True}
+    cal = calendar_mom_dates(dates)
+    if cal:
+        cur_dates, pri_dates, cur_label, pri_label = cal
+        kw_cur, kw_pri = agg_kw(cur_dates), agg_kw(pri_dates)
+        kw_mom = kw_cur.merge(kw_pri, on=["query", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
+        kw_mom["imp_change"] = (kw_mom["impressions_r"] - kw_mom["impressions_p"]).astype(int)
+        kw_mom["clicks_change"] = (kw_mom["clicks_r"] - kw_mom["clicks_p"]).astype(int)
+        kw_mom["pos_change"] = (kw_mom["avg_position_r"] - kw_mom["avg_position_p"]).round(1)
+        kw_mom_sig = kw_mom[kw_mom["impressions_p"] >= 50]
+
+        url_cur, url_pri = agg_url(cur_dates), agg_url(pri_dates)
+        url_mom = url_cur.merge(url_pri, on=["url", "url_path", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
+        url_mom["imp_change"] = (url_mom["impressions_r"] - url_mom["impressions_p"]).astype(int)
+        url_mom["clicks_change"] = (url_mom["clicks_r"] - url_mom["clicks_p"]).astype(int)
+        url_mom_sig = url_mom[url_mom["impressions_p"] >= 100]
+
+        pos_mom_sig = kw_mom_sig[(kw_mom_sig["avg_position_p"] > 0) & (kw_mom_sig["avg_position_r"] > 0)]
+        calendar_mom = {
+            "period_current": cur_label,
+            "period_prior": pri_label,
+            "keyword_winners": [kw_rec(r) for _, r in kw_mom_sig.nlargest(300, "clicks_change").iterrows()],
+            "keyword_losers": [kw_rec(r) for _, r in kw_mom_sig.nsmallest(300, "clicks_change").iterrows()],
+            "url_winners": [url_rec(r) for _, r in url_mom_sig.nlargest(300, "clicks_change").iterrows()],
+            "url_losers": [url_rec(r) for _, r in url_mom_sig.nsmallest(300, "clicks_change").iterrows()],
+            "pos_gainers": [kw_rec(r) for _, r in pos_mom_sig.nsmallest(300, "pos_change").iterrows()],
+            "pos_losers": [kw_rec(r) for _, r in pos_mom_sig.nlargest(300, "pos_change").iterrows()],
+        }
+
     # Ranked by click change (the primary/default lens) rather than impressions —
     # impression swings without click swings are much less actionable.
     return {
@@ -873,6 +924,7 @@ def generate_movers(df):
         "url_losers": [url_rec(r) for _, r in url_sig.nsmallest(300, "clicks_change").iterrows()],
         "pos_gainers": [kw_rec(r) for _, r in pos_sig.nsmallest(300, "pos_change").iterrows()],
         "pos_losers": [kw_rec(r) for _, r in pos_sig.nlargest(300, "pos_change").iterrows()],
+        "calendar_mom": calendar_mom,
     }
 
 
@@ -1132,6 +1184,70 @@ def generate_keyword_themes(df):
         }
 
     # ── Recent-vs-prior movers, per theme+market and per theme overall ──
+    # Two variants share the same machinery: a rolling window (last N days vs
+    # the N before that) and a calendar-aligned "last full month vs previous
+    # month" one that lines up with the Dashboard tab's own MoM preset.
+    def period_theme_market_stats(date_set):
+        sub = kw_df[kw_df["data_date"].isin(date_set)]
+        agg = sub.groupby(["query", "market"]).agg(
+            impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+            sum_position=("sum_position", "sum"),
+        ).reset_index()
+        return stream_theme_group(agg, "market")
+
+    def mover_rec(theme, market, r, p):
+        imp_r, clk_r, sp_r = r[0], r[1], r[2]
+        imp_p, clk_p, sp_p = p[0], p[1], p[2]
+        pos_r, pos_p = avg_pos(sp_r, imp_r), avg_pos(sp_p, imp_p)
+        return {
+            "theme": theme, "market": market,
+            "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+            "clicks_change": int(clk_r - clk_p),
+            "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else 0,
+            "imp_recent": int(imp_r), "imp_prior": int(imp_p),
+            "imp_change": int(imp_r - imp_p),
+            "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
+            "pos_recent": float(pos_r), "pos_prior": float(pos_p),
+            "pos_change": round(pos_r - pos_p, 1) if pos_r > 0 and pos_p > 0 else 0,
+        }
+
+    def build_theme_movers(current_dates, prior_dates):
+        """Ranked by click change (the primary/default lens), not impressions."""
+        current_stats = period_theme_market_stats(current_dates)
+        prior_stats = period_theme_market_stats(prior_dates)
+
+        zero = [0, 0, 0.0, 0]
+        theme_market_movers = []
+        for key in set(current_stats) | set(prior_stats):
+            theme, market = key
+            p = prior_stats.get(key, zero)
+            if p[0] < THEME_MIN_IMPRESSIONS:
+                continue
+            theme_market_movers.append(mover_rec(theme, market, current_stats.get(key, zero), p))
+        theme_market_movers.sort(key=lambda r: r["clicks_change"], reverse=True)
+
+        current_by_theme = rollup_by_theme(current_stats)
+        prior_by_theme = rollup_by_theme(prior_stats)
+        theme_overall_movers = []
+        for theme in set(current_by_theme) | set(prior_by_theme):
+            r = current_by_theme.get(theme, (0, 0, 0.0, None))
+            p = prior_by_theme.get(theme, (0, 0, 0.0, None))
+            imp_r, clk_r = r[0], r[1]
+            imp_p, clk_p = p[0], p[1]
+            if imp_p < THEME_MIN_IMPRESSIONS:
+                continue
+            theme_overall_movers.append({
+                "theme": theme,
+                "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+                "clicks_change": int(clk_r - clk_p),
+                "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else 0,
+                "imp_recent": int(imp_r), "imp_prior": int(imp_p),
+                "imp_change": int(imp_r - imp_p),
+                "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
+            })
+        theme_overall_movers.sort(key=lambda r: r["clicks_change"], reverse=True)
+        return theme_market_movers, theme_overall_movers
+
     dates = sorted(kw_df["data_date"].unique())
     n = len(dates)
     movers = {"insufficient_data": True}
@@ -1140,71 +1256,27 @@ def generate_keyword_themes(df):
         recent_dates = set(dates[-split:])
         prior_dates = set(dates[-split * 2:-split])
         if prior_dates:
-            def period_theme_market_stats(date_set):
-                sub = kw_df[kw_df["data_date"].isin(date_set)]
-                agg = sub.groupby(["query", "market"]).agg(
-                    impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-                    sum_position=("sum_position", "sum"),
-                ).reset_index()
-                return stream_theme_group(agg, "market")
-
-            recent_stats = period_theme_market_stats(recent_dates)
-            prior_stats = period_theme_market_stats(prior_dates)
-
-            def mover_rec(theme, market, r, p):
-                imp_r, clk_r, sp_r = r[0], r[1], r[2]
-                imp_p, clk_p, sp_p = p[0], p[1], p[2]
-                pos_r, pos_p = avg_pos(sp_r, imp_r), avg_pos(sp_p, imp_p)
-                return {
-                    "theme": theme, "market": market,
-                    "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
-                    "clicks_change": int(clk_r - clk_p),
-                    "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else 0,
-                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
-                    "imp_change": int(imp_r - imp_p),
-                    "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
-                    "pos_recent": float(pos_r), "pos_prior": float(pos_p),
-                    "pos_change": round(pos_r - pos_p, 1) if pos_r > 0 and pos_p > 0 else 0,
-                }
-
-            # Ranked by click change (the primary/default lens), not impressions.
-            zero = [0, 0, 0.0, 0]
-            theme_market_movers = []
-            for key in set(recent_stats) | set(prior_stats):
-                theme, market = key
-                p = prior_stats.get(key, zero)
-                if p[0] < THEME_MIN_IMPRESSIONS:
-                    continue
-                theme_market_movers.append(mover_rec(theme, market, recent_stats.get(key, zero), p))
-            theme_market_movers.sort(key=lambda r: r["clicks_change"], reverse=True)
-
-            recent_by_theme = rollup_by_theme(recent_stats)
-            prior_by_theme = rollup_by_theme(prior_stats)
-            theme_overall_movers = []
-            for theme in set(recent_by_theme) | set(prior_by_theme):
-                r = recent_by_theme.get(theme, (0, 0, 0.0, None))
-                p = prior_by_theme.get(theme, (0, 0, 0.0, None))
-                imp_r, clk_r = r[0], r[1]
-                imp_p, clk_p = p[0], p[1]
-                if imp_p < THEME_MIN_IMPRESSIONS:
-                    continue
-                theme_overall_movers.append({
-                    "theme": theme,
-                    "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
-                    "clicks_change": int(clk_r - clk_p),
-                    "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else 0,
-                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
-                    "imp_change": int(imp_r - imp_p),
-                    "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
-                })
-            theme_overall_movers.sort(key=lambda r: r["clicks_change"], reverse=True)
-
+            theme_market_movers, theme_overall_movers = build_theme_movers(recent_dates, prior_dates)
             movers = {
                 "period_recent": f"{min(recent_dates)} to {max(recent_dates)}",
                 "period_prior": f"{min(prior_dates)} to {max(prior_dates)}",
                 "theme_market_movers": theme_market_movers,
                 "theme_overall_movers": theme_overall_movers,
             }
+
+    # Calendar-aligned MoM variant (true YoY isn't possible: the source data
+    # only covers ~6 months).
+    calendar_mom = {"insufficient_data": True}
+    cal = calendar_mom_dates(dates)
+    if cal:
+        cur_dates, pri_dates, cur_label, pri_label = cal
+        cal_theme_market_movers, cal_theme_overall_movers = build_theme_movers(cur_dates, pri_dates)
+        calendar_mom = {
+            "period_current": cur_label,
+            "period_prior": pri_label,
+            "theme_market_movers": cal_theme_market_movers,
+            "theme_overall_movers": cal_theme_overall_movers,
+        }
 
     # ── Sample keywords per theme for drill-down ──
     # Bounded min-heap per theme (size THEME_MAX_SAMPLE_KEYWORDS) instead of
@@ -1250,6 +1322,7 @@ def generate_keyword_themes(df):
         "theme_market": theme_market_out,
         "trend_weekly": trend_weekly,
         "movers": movers,
+        "calendar_mom": calendar_mom,
         "keywords_by_theme": keywords_by_theme,
     }
 
