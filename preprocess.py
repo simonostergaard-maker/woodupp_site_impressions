@@ -12,6 +12,8 @@ import json
 import re
 import sys
 import os
+import heapq
+import itertools
 from collections import defaultdict
 from pathlib import Path
 
@@ -277,6 +279,19 @@ def generate_anonymized_data(df):
     return result
 
 
+# Deep-but-bounded caps for the raw per-keyword/per-URL tables. A mature
+# multi-market site's full keyword universe can run into the hundreds of
+# thousands of rows — embedding all of it would blow the generated HTML past
+# GitHub's 100MB per-file push limit. These are far deeper than a shallow
+# "top 20/50" cutoff (enough for genuine searching/sorting/digging), while
+# the Keyword Themes tab is what gives truly exhaustive, uncapped coverage —
+# it aggregates every keyword into a bounded set of themes instead of
+# listing them all individually.
+TABLE_MAX_ROWS_PER_MARKET = 2000
+TABLE_MAX_ROWS_ALL_MARKETS = 5000
+BRAND_TOP_N = 500
+
+
 def generate_url_performance(df):
     url_agg = df.groupby(["market", "url", "url_path"]).agg(
         impressions=("impressions", "sum"),
@@ -290,7 +305,7 @@ def generate_url_performance(df):
 
     result = {}
     for market in url_agg["market"].unique():
-        mdf = url_agg[url_agg["market"] == market].sort_values("impressions", ascending=False)
+        mdf = url_agg[url_agg["market"] == market].sort_values("impressions", ascending=False).head(TABLE_MAX_ROWS_PER_MARKET)
         result[market] = [{
             "url": row["url"],
             "path": row["url_path"],
@@ -314,7 +329,7 @@ def generate_url_performance(df):
     ).reset_index()
     url_all_agg["avg_position"] = (url_all_agg["sum_position"] / url_all_agg["impressions"]).round(1)
     url_all_agg["ctr"] = (url_all_agg["clicks"] / url_all_agg["impressions"] * 100).round(2)
-    top_all = url_all_agg.sort_values("impressions", ascending=False)
+    top_all = url_all_agg.sort_values("impressions", ascending=False).head(TABLE_MAX_ROWS_ALL_MARKETS)
     result["All Markets"] = [{
         "url": row["url"],
         "path": row["url_path"],
@@ -343,7 +358,7 @@ def generate_keyword_performance(df):
 
     result = {}
     for market in kw_agg["market"].unique():
-        mdf = kw_agg[kw_agg["market"] == market].sort_values("impressions", ascending=False)
+        mdf = kw_agg[kw_agg["market"] == market].sort_values("impressions", ascending=False).head(TABLE_MAX_ROWS_PER_MARKET)
         result[market] = [{
             "query": row["query"],
             "impressions": int(row["impressions"]),
@@ -362,7 +377,7 @@ def generate_keyword_performance(df):
     ).reset_index()
     kw_all["avg_position"] = (kw_all["sum_position"] / kw_all["impressions"]).round(1)
     kw_all["ctr"] = (kw_all["clicks"] / kw_all["impressions"] * 100).round(2)
-    top_all = kw_all.sort_values("impressions", ascending=False)
+    top_all = kw_all.sort_values("impressions", ascending=False).head(TABLE_MAX_ROWS_ALL_MARKETS)
     result["All Markets"] = [{
         "query": row["query"],
         "impressions": int(row["impressions"]),
@@ -707,10 +722,14 @@ def generate_brand_analysis(df):
     ).reset_index()
     brand_agg["avg_position"] = (brand_agg["sum_position"] / brand_agg["impressions"]).round(1)
     brand_agg["ctr"] = (brand_agg["clicks"] / brand_agg["impressions"] * 100).round(2)
-    top_brand = brand_agg.sort_values("impressions", ascending=False).apply(
-        lambda r: {"query": r["query"], "impressions": int(r["impressions"]),
-                    "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
-                    "ctr": float(r["ctr"]), "markets": int(r["markets"])}, axis=1).tolist()
+    # to_dict('records') (not .apply(axis=1).tolist()) — apply on a zero-row
+    # DataFrame returns an empty DataFrame instead of a Series, which breaks
+    # .tolist(); a market/period with no brand (or no non-brand) queries at
+    # all would otherwise crash this.
+    top_brand = [{"query": r["query"], "impressions": int(r["impressions"]),
+                  "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
+                  "ctr": float(r["ctr"]), "markets": int(r["markets"])}
+                 for r in brand_agg.sort_values("impressions", ascending=False).head(BRAND_TOP_N).to_dict("records")]
 
     nb_agg = nonbrand.groupby("query").agg(
         impressions=("impressions", "sum"), clicks=("clicks", "sum"),
@@ -718,10 +737,10 @@ def generate_brand_analysis(df):
     ).reset_index()
     nb_agg["avg_position"] = (nb_agg["sum_position"] / nb_agg["impressions"]).round(1)
     nb_agg["ctr"] = (nb_agg["clicks"] / nb_agg["impressions"] * 100).round(2)
-    top_nonbrand = nb_agg.sort_values("impressions", ascending=False).apply(
-        lambda r: {"query": r["query"], "impressions": int(r["impressions"]),
-                    "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
-                    "ctr": float(r["ctr"]), "markets": int(r["markets"])}, axis=1).tolist()
+    top_nonbrand = [{"query": r["query"], "impressions": int(r["impressions"]),
+                     "clicks": int(r["clicks"]), "avg_position": float(r["avg_position"]),
+                     "ctr": float(r["ctr"]), "markets": int(r["markets"])}
+                    for r in nb_agg.sort_values("impressions", ascending=False).head(BRAND_TOP_N).to_dict("records")]
 
     result = {
         "overall": overall,
@@ -964,8 +983,9 @@ THEME_TOKEN_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 THEME_MIN_QUERIES = 3        # a theme must be shared by at least this many distinct keywords
 THEME_MIN_IMPRESSIONS = 100  # ...and account for at least this many impressions to matter
-THEME_MAX_SAMPLE_KEYWORDS = 150  # per-theme keyword drill-down list — a payload-size guard,
-                                  # not an analysis cutoff (theme totals always use every keyword)
+THEME_MAX_COUNT = 3000       # hard ceiling on how many themes are kept, by total impressions
+THEME_MAX_SAMPLE_KEYWORDS = 50  # per-theme keyword drill-down list — a payload-size guard,
+                                 # not an analysis cutoff (theme totals always use every keyword)
 
 
 def tokenize_query(query):
@@ -1011,58 +1031,82 @@ def generate_keyword_themes(df):
     if not significant:
         return {"insufficient_data": True}
 
+    # Hard ceiling on how many themes carry through, keyed by total impressions.
+    # 20 markets across ~11 languages can surface a much bigger recurring
+    # vocabulary than a single-language test does, and every downstream
+    # structure (weekly trend, per-market breakdown, keyword samples) scales
+    # with theme count — this keeps the payload predictable regardless of how
+    # diverse the real keyword set turns out to be.
+    if len(significant) > THEME_MAX_COUNT:
+        significant = set(sorted(significant, key=lambda th: theme_impressions[th], reverse=True)[:THEME_MAX_COUNT])
+
     q2themes = {q: [t for t in themes if t in significant] for q, themes in query_themes.items()}
     q2themes = {q: t for q, t in q2themes.items() if t}
 
-    def explode_by_theme(agg_df):
-        agg_df = agg_df.copy()
-        agg_df["theme"] = agg_df["query"].map(q2themes)
-        agg_df = agg_df[agg_df["theme"].map(bool)]
-        return agg_df.explode("theme")
+    # A query can map to several themes, and a full pandas .explode() over
+    # every (query, market[, week]) row would multiply row count by
+    # themes-per-query — at millions of keywords that's tens of millions of
+    # rows materialized at once. Instead, stream each pre-aggregated table
+    # through once and fold straight into small per-theme accumulator dicts
+    # (bounded by the number of significant themes, not by raw row count).
+    def stream_theme_group(agg_df, group_col):
+        """Single pass over a (query, <group_col>, impressions, clicks,
+        sum_position) table. Returns dict[(theme, group_value)] ->
+        [impressions, clicks, sum_position, row_count]."""
+        stats = defaultdict(lambda: [0, 0, 0.0, 0])
+        for row in agg_df.itertuples(index=False):
+            themes = q2themes.get(row.query)
+            if not themes:
+                continue
+            impressions, clicks, sum_position = row.impressions, row.clicks, row.sum_position
+            group_value = getattr(row, group_col)
+            for th in themes:
+                s = stats[(th, group_value)]
+                s[0] += impressions
+                s[1] += clicks
+                s[2] += sum_position
+                s[3] += 1
+        return stats
+
+    def rollup_by_theme(stats):
+        """Collapse a dict[(theme, group)] -> [...] into dict[theme] -> [impressions, clicks, sum_position, {groups}]."""
+        rolled = defaultdict(lambda: [0, 0, 0.0, set()])
+        for (theme, group_value), (imp, clk, sp, _cnt) in stats.items():
+            r = rolled[theme]
+            r[0] += imp; r[1] += clk; r[2] += sp; r[3].add(group_value)
+        return rolled
+
+    def avg_pos(sum_position, impressions):
+        return round(sum_position / impressions, 1) if impressions > 0 else 0
+
+    def ctr_of(clicks, impressions):
+        return round(clicks / impressions * 100, 2) if impressions > 0 else 0
 
     # ── Theme x market totals (all dates) ──
     qm_agg = kw_df.groupby(["query", "market"]).agg(
         impressions=("impressions", "sum"), clicks=("clicks", "sum"),
         sum_position=("sum_position", "sum"),
     ).reset_index()
-    exploded_qm = explode_by_theme(qm_agg)
-
-    theme_market = exploded_qm.groupby(["theme", "market"]).agg(
-        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-        sum_position=("sum_position", "sum"), keyword_count=("query", "nunique"),
-    ).reset_index()
-    theme_market["avg_position"] = (theme_market["sum_position"] / theme_market["impressions"]).round(1)
-    theme_market["ctr"] = (theme_market["clicks"] / theme_market["impressions"] * 100).round(2)
-    theme_market = theme_market.sort_values("impressions", ascending=False)
-
-    theme_overall = theme_market.groupby("theme").agg(
-        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-        sum_position=("sum_position", "sum"), market_count=("market", "nunique"),
-    ).reset_index()
-    kc = exploded_qm.groupby("theme")["query"].nunique().reset_index(name="keyword_count")
-    theme_overall = theme_overall.merge(kc, on="theme")
-    theme_overall["avg_position"] = (theme_overall["sum_position"] / theme_overall["impressions"]).round(1)
-    theme_overall["ctr"] = (theme_overall["clicks"] / theme_overall["impressions"] * 100).round(2)
-    theme_overall = theme_overall.sort_values("impressions", ascending=False)
-
-    themes_out = [{
-        "theme": row["theme"],
-        "type": "phrase" if " " in row["theme"] else "word",
-        "impressions": int(row["impressions"]),
-        "clicks": int(row["clicks"]),
-        "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
-        "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
-        "keyword_count": int(row["keyword_count"]),
-        "market_count": int(row["market_count"]),
-    } for _, row in theme_overall.iterrows()]
+    theme_market_stats = stream_theme_group(qm_agg, "market")
 
     theme_market_out = [{
-        "theme": row["theme"], "market": row["market"],
-        "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
-        "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
-        "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
-        "keyword_count": int(row["keyword_count"]),
-    } for _, row in theme_market.iterrows()]
+        "theme": theme, "market": market,
+        "impressions": int(imp), "clicks": int(clk),
+        "ctr": ctr_of(clk, imp), "avg_position": avg_pos(sp, imp),
+        "keyword_count": int(kc),
+    } for (theme, market), (imp, clk, sp, kc) in theme_market_stats.items()]
+    theme_market_out.sort(key=lambda r: r["impressions"], reverse=True)
+
+    theme_rolled = rollup_by_theme(theme_market_stats)
+    themes_out = [{
+        "theme": theme,
+        "type": "phrase" if " " in theme else "word",
+        "impressions": int(imp), "clicks": int(clk),
+        "ctr": ctr_of(clk, imp), "avg_position": avg_pos(sp, imp),
+        "keyword_count": theme_support[theme],  # distinct keywords globally, already counted above
+        "market_count": len(markets),
+    } for theme, (imp, clk, sp, markets) in theme_rolled.items()]
+    themes_out.sort(key=lambda r: r["impressions"], reverse=True)
 
     # ── Weekly trend per theme (across all markets) ──
     kw_df["week"] = pd.to_datetime(kw_df["data_date"]).dt.to_period("W-SUN").apply(
@@ -1071,18 +1115,12 @@ def generate_keyword_themes(df):
         impressions=("impressions", "sum"), clicks=("clicks", "sum"),
         sum_position=("sum_position", "sum"),
     ).reset_index()
-    theme_week = explode_by_theme(qw_agg).groupby(["theme", "week"]).agg(
-        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-        sum_position=("sum_position", "sum"),
-    ).reset_index()
-    theme_week["avg_position"] = (theme_week["sum_position"] / theme_week["impressions"]).round(1)
+    theme_week_stats = stream_theme_group(qw_agg, "week")
 
     trend_weekly = {}
-    for _, row in theme_week.iterrows():
-        trend_weekly.setdefault(row["theme"], {})[row["week"]] = {
-            "impressions": int(row["impressions"]),
-            "clicks": int(row["clicks"]),
-            "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+    for (theme, week), (imp, clk, sp, _cnt) in theme_week_stats.items():
+        trend_weekly.setdefault(theme, {})[week] = {
+            "impressions": int(imp), "clicks": int(clk), "avg_position": avg_pos(sp, imp),
         }
 
     # ── Recent-vs-prior movers, per theme+market and per theme overall ──
@@ -1094,53 +1132,59 @@ def generate_keyword_themes(df):
         recent_dates = set(dates[-split:])
         prior_dates = set(dates[-split * 2:-split])
         if prior_dates:
-            def period_theme_market(date_set):
+            def period_theme_market_stats(date_set):
                 sub = kw_df[kw_df["data_date"].isin(date_set)]
                 agg = sub.groupby(["query", "market"]).agg(
                     impressions=("impressions", "sum"), clicks=("clicks", "sum"),
                     sum_position=("sum_position", "sum"),
                 ).reset_index()
-                out = explode_by_theme(agg).groupby(["theme", "market"]).agg(
-                    impressions=("impressions", "sum"), clicks=("clicks", "sum"),
-                    sum_position=("sum_position", "sum"),
-                ).reset_index()
-                out["avg_position"] = (out["sum_position"] / out["impressions"]).round(1)
-                return out
+                return stream_theme_group(agg, "market")
 
-            recent = period_theme_market(recent_dates)
-            prior = period_theme_market(prior_dates)
-            merged = recent.merge(prior, on=["theme", "market"], how="outer", suffixes=("_r", "_p")).fillna(0)
-            merged["imp_change"] = (merged["impressions_r"] - merged["impressions_p"]).astype(int)
-            sig = merged[merged["impressions_p"] >= THEME_MIN_IMPRESSIONS]
+            recent_stats = period_theme_market_stats(recent_dates)
+            prior_stats = period_theme_market_stats(prior_dates)
 
-            def mover_rec(row):
-                pos_r, pos_p = row["avg_position_r"], row["avg_position_p"]
+            def mover_rec(theme, market, r, p):
+                imp_r, clk_r, sp_r = r[0], r[1], r[2]
+                imp_p, clk_p, sp_p = p[0], p[1], p[2]
+                pos_r, pos_p = avg_pos(sp_r, imp_r), avg_pos(sp_p, imp_p)
                 return {
-                    "theme": row["theme"], "market": row["market"],
-                    "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
-                    "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
-                    "imp_change": int(row["imp_change"]),
-                    "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1)
-                               if row["impressions_p"] > 0 else 0,
+                    "theme": theme, "market": market,
+                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
+                    "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+                    "imp_change": int(imp_r - imp_p),
+                    "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
                     "pos_recent": float(pos_r), "pos_prior": float(pos_p),
-                    "pos_change": round(float(pos_r - pos_p), 1) if pos_r > 0 and pos_p > 0 else 0,
+                    "pos_change": round(pos_r - pos_p, 1) if pos_r > 0 and pos_p > 0 else 0,
                 }
 
-            theme_market_movers = [mover_rec(r) for _, r in sig.sort_values("imp_change", ascending=False).iterrows()]
+            zero = [0, 0, 0.0, 0]
+            theme_market_movers = []
+            for key in set(recent_stats) | set(prior_stats):
+                theme, market = key
+                p = prior_stats.get(key, zero)
+                if p[0] < THEME_MIN_IMPRESSIONS:
+                    continue
+                theme_market_movers.append(mover_rec(theme, market, recent_stats.get(key, zero), p))
+            theme_market_movers.sort(key=lambda r: r["imp_change"], reverse=True)
 
-            overall_sig = sig.groupby("theme").agg(
-                impressions_r=("impressions_r", "sum"), impressions_p=("impressions_p", "sum"),
-                clicks_r=("clicks_r", "sum"), clicks_p=("clicks_p", "sum"),
-            ).reset_index()
-            overall_sig["imp_change"] = (overall_sig["impressions_r"] - overall_sig["impressions_p"]).astype(int)
-            theme_overall_movers = [{
-                "theme": row["theme"],
-                "imp_recent": int(row["impressions_r"]), "imp_prior": int(row["impressions_p"]),
-                "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
-                "imp_change": int(row["imp_change"]),
-                "imp_pct": round((row["impressions_r"] - row["impressions_p"]) / row["impressions_p"] * 100, 1)
-                           if row["impressions_p"] > 0 else 0,
-            } for _, row in overall_sig.sort_values("imp_change", ascending=False).iterrows()]
+            recent_by_theme = rollup_by_theme(recent_stats)
+            prior_by_theme = rollup_by_theme(prior_stats)
+            theme_overall_movers = []
+            for theme in set(recent_by_theme) | set(prior_by_theme):
+                r = recent_by_theme.get(theme, (0, 0, 0.0, None))
+                p = prior_by_theme.get(theme, (0, 0, 0.0, None))
+                imp_r, clk_r = r[0], r[1]
+                imp_p, clk_p = p[0], p[1]
+                if imp_p < THEME_MIN_IMPRESSIONS:
+                    continue
+                theme_overall_movers.append({
+                    "theme": theme,
+                    "imp_recent": int(imp_r), "imp_prior": int(imp_p),
+                    "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+                    "imp_change": int(imp_r - imp_p),
+                    "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else 0,
+                })
+            theme_overall_movers.sort(key=lambda r: r["imp_change"], reverse=True)
 
             movers = {
                 "period_recent": f"{min(recent_dates)} to {max(recent_dates)}",
@@ -1149,24 +1193,39 @@ def generate_keyword_themes(df):
                 "theme_overall_movers": theme_overall_movers,
             }
 
-    # ── Sample keywords per theme for drill-down (capped for payload size only) ──
+    # ── Sample keywords per theme for drill-down ──
+    # Bounded min-heap per theme (size THEME_MAX_SAMPLE_KEYWORDS) instead of
+    # collecting every matching keyword and truncating afterward — keeps peak
+    # memory at significant_themes × THEME_MAX_SAMPLE_KEYWORDS regardless of
+    # how many keywords roll into a broad theme like "table".
     q_totals = kw_df.groupby("query").agg(
         impressions=("impressions", "sum"), clicks=("clicks", "sum"),
         sum_position=("sum_position", "sum"), market_count=("market", "nunique"),
     ).reset_index()
-    q_totals["avg_position"] = (q_totals["sum_position"] / q_totals["impressions"]).round(1)
-    q_totals["ctr"] = (q_totals["clicks"] / q_totals["impressions"] * 100).round(2)
-    exp_q = explode_by_theme(q_totals)
 
-    keywords_by_theme = {}
-    for theme, grp in exp_q.groupby("theme"):
-        top = grp.sort_values("impressions", ascending=False).head(THEME_MAX_SAMPLE_KEYWORDS)
-        keywords_by_theme[theme] = [{
-            "query": r["query"], "impressions": int(r["impressions"]), "clicks": int(r["clicks"]),
-            "ctr": float(r["ctr"]) if pd.notna(r["ctr"]) else 0,
-            "avg_position": float(r["avg_position"]) if pd.notna(r["avg_position"]) else 0,
-            "market_count": int(r["market_count"]),
-        } for _, r in top.iterrows()]
+    theme_keyword_heaps = defaultdict(list)
+    tiebreak = itertools.count()
+    for row in q_totals.itertuples(index=False):
+        themes = q2themes.get(row.query)
+        if not themes:
+            continue
+        rec = {
+            "query": row.query, "impressions": int(row.impressions), "clicks": int(row.clicks),
+            "ctr": ctr_of(row.clicks, row.impressions), "avg_position": avg_pos(row.sum_position, row.impressions),
+            "market_count": int(row.market_count),
+        }
+        item = (row.impressions, next(tiebreak), rec)
+        for th in themes:
+            heap = theme_keyword_heaps[th]
+            if len(heap) < THEME_MAX_SAMPLE_KEYWORDS:
+                heapq.heappush(heap, item)
+            elif item[0] > heap[0][0]:
+                heapq.heapreplace(heap, item)
+
+    keywords_by_theme = {
+        theme: [rec for _imp, _tie, rec in sorted(heap, key=lambda x: x[0], reverse=True)]
+        for theme, heap in theme_keyword_heaps.items()
+    }
 
     print(f"  Keyword themes: {len(themes_out)} significant themes from {len(unique_queries):,} unique keywords")
 
