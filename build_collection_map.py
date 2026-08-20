@@ -20,8 +20,24 @@ Usage:
 """
 import csv
 import json
+import re
 import sys
 from pathlib import Path
+
+# Shopify exports like this typically carry internal/operational
+# "collections" alongside real merchandising ones — per-market shipping
+# rules ("AT | Akupixel shipping"), listing-grouping helpers
+# ("Combined_listing_parent"), and test entries. These would otherwise show
+# up as confusing theme/business-area labels, so skip them.
+JUNK_TITLE_RE = re.compile(r"\||shipping|_", re.IGNORECASE)
+
+
+def is_real_collection(handle, title):
+    if not title or JUNK_TITLE_RE.search(title):
+        return False
+    if handle.strip().lower() == "test" or title.strip().lower() == "test":
+        return False
+    return True
 
 SCRIPT_DIR = Path(__file__).parent
 OUTPUT_PATH = SCRIPT_DIR / "data" / "collection_url_map.json"
@@ -76,7 +92,11 @@ def build_map(csv_path):
         titles.setdefault(handle, handle)
 
     collections = {}
+    skipped = 0
     for handle, locale_handles in by_collection.items():
+        if not is_real_collection(handle, titles.get(handle, "")):
+            skipped += 1
+            continue
         markets = {}
         for market in DEFAULT_HANDLE_MARKETS:
             markets[market] = {"default": handle}
@@ -98,6 +118,7 @@ def build_map(csv_path):
                 markets[market] = entry
         collections[handle] = {"title": titles[handle], "markets": markets}
 
+    print(f"  Skipped {skipped} internal/operational collection(s) (shipping rules, test entries, etc.)")
     return {
         "generated_from": Path(csv_path).name,
         "collections": collections,
