@@ -150,6 +150,7 @@ select:focus, input:focus { border-color: var(--accent); }
 <div class="tabs" id="tabsBar">
   <div class="tab active" data-tab="overview">Dashboard</div>
   <div class="tab" data-tab="themes">Keyword Themes</div>
+  <div class="tab" data-tab="business">Business Areas</div>
   <div class="tab" data-tab="brand">Brand Analysis</div>
   <div class="tab" data-tab="anonymized">Anonymized Queries</div>
   <div class="tab" data-tab="urls">URL Performance</div>
@@ -386,6 +387,39 @@ select:focus, input:focus { border-color: var(--accent); }
     </div>
   </div>
 
+  <!-- BUSINESS AREAS -->
+  <div class="tab-content" id="tab-business">
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="biz-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Search</label><input type="search" id="biz-search" placeholder="Filter business areas..."></div>
+      <div class="filter-group"><label>Type</label>
+        <select id="biz-type-filter">
+          <option value="all">Collections + Products</option>
+          <option value="collection">Collections</option>
+          <option value="product">Products</option>
+        </select>
+      </div>
+      <div class="filter-group"><label>Sort by</label>
+        <select id="biz-sort">
+          <option value="clicks">Clicks</option>
+          <option value="impressions">Impressions</option>
+          <option value="ctr">CTR</option>
+          <option value="avg_position">Avg Position</option>
+          <option value="market_count">Markets</option>
+        </select>
+      </div>
+    </div>
+    <div id="biz-kpis"></div>
+    <div class="card"><h3>Business Areas</h3><div class="table-wrap" id="biz-table"></div></div>
+    <div class="card">
+      <h3>Business Area Detail</h3>
+      <select id="biz-detail-select" style="margin-bottom:10px"><option value="">Select a business area to inspect...</option></select>
+      <div id="biz-detail-kpis"></div>
+      <div class="card" style="margin:0"><h3>Performance by Market</h3><div class="chart-container" id="chart-biz-markets"></div></div>
+      <div class="card" style="margin-top:16px;margin-bottom:0"><h3>Per-Market Breakdown</h3><div class="table-wrap" id="biz-detail-markets"></div></div>
+    </div>
+  </div>
+
   <!-- MOVERS & SHAKERS -->
   <div class="tab-content" id="tab-movers">
     <div class="filters">
@@ -493,6 +527,11 @@ function initApp() {
   document.getElementById('theme-search').addEventListener('input', renderThemes);
   document.getElementById('theme-type-filter').addEventListener('change', renderThemes);
   document.getElementById('theme-trend-period').addEventListener('change', renderThemes);
+  renderBusinessAreas();
+  document.getElementById('biz-market-filter').addEventListener('change', renderBusinessAreas);
+  document.getElementById('biz-sort').addEventListener('change', renderBusinessAreas);
+  document.getElementById('biz-search').addEventListener('input', renderBusinessAreas);
+  document.getElementById('biz-type-filter').addEventListener('change', renderBusinessAreas);
 }
 
 function populateFilters() {
@@ -518,6 +557,8 @@ function populateFilters() {
   if (brandSel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; brandSel.appendChild(o); }); }
   const themeSel = document.getElementById('theme-market-filter');
   if (themeSel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; themeSel.appendChild(o); }); }
+  const bizSel = document.getElementById('biz-market-filter');
+  if (bizSel) { markets.forEach(m => { const o = document.createElement('option'); o.value = m.market; o.textContent = m.flag+' '+m.market; bizSel.appendChild(o); }); }
 }
 
 // ═══════════════════════════════════════════
@@ -1528,6 +1569,115 @@ function selectTheme(theme) {
   });
   html += '</tbody></table>';
   document.getElementById('theme-detail-keywords').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════
+// BUSINESS AREAS (cross-market URL grouping)
+// ═══════════════════════════════════════════
+let bizDetailCurrent = '';
+
+function renderBusinessAreas() {
+  const ba = DATA.business_areas;
+  if (!ba || ba.insufficient_data) {
+    document.getElementById('biz-kpis').innerHTML = '<div class="card" style="color:var(--muted)">Not enough URL data yet to group business areas — run preprocess.py against a full CSV export.</div>';
+    document.getElementById('biz-table').innerHTML = '';
+    return;
+  }
+
+  const market = document.getElementById('biz-market-filter').value;
+  const search = document.getElementById('biz-search').value.toLowerCase();
+  const sortBy = document.getElementById('biz-sort').value;
+  const typeFilter = document.getElementById('biz-type-filter').value;
+
+  const areaMeta = {};
+  ba.areas.forEach(a => { areaMeta[a.type + '|' + a.key] = a; });
+
+  let rows;
+  if (market === 'All Markets') {
+    rows = ba.areas;
+  } else {
+    rows = ba.area_market.filter(r => r.market === market).map(r => ({
+      ...r, title: (areaMeta[r.type + '|' + r.key] || {}).title || r.key, market_count: 1,
+    }));
+  }
+
+  if (typeFilter !== 'all') rows = rows.filter(r => r.type === typeFilter);
+  if (search) rows = rows.filter(r => r.title.toLowerCase().includes(search) || r.key.toLowerCase().includes(search));
+  rows = [...rows].sort((a,b) => sortBy==='avg_position' ? a[sortBy]-b[sortBy] : b[sortBy]-a[sortBy]);
+
+  const nCollections = ba.areas.filter(a => a.type === 'collection').length;
+  const nProducts = ba.areas.filter(a => a.type === 'product').length;
+  const totalClicks = ba.areas.reduce((s,a) => s+a.clicks, 0);
+  document.getElementById('biz-kpis').innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Business Areas</div><div class="value blue">${fmtN(ba.areas.length)}</div></div>
+      <div class="kpi"><div class="label">Collections</div><div class="value cyan">${fmtN(nCollections)}</div></div>
+      <div class="kpi"><div class="label">Products</div><div class="value purple">${fmtN(nProducts)}</div></div>
+      <div class="kpi"><div class="label">Total Clicks</div><div class="value green">${fmt(totalClicks)}</div></div>
+    </div>
+    ${ba.has_collection_mapping ? '' : '<div class="card" style="color:var(--muted);font-size:13px;margin-bottom:16px">No collection_url_map.json found — collections aren\'t grouped across markets yet, only products (which need no mapping). Run build_collection_map.py against a Shopify translations export to enable it.</div>'}`;
+
+  let html = '<table><thead><tr><th>Business Area</th><th>Type</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th>' +
+    (market === 'All Markets' ? '<th>Markets</th><th>URLs</th>' : '') + '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += `<tr class="biz-row" data-type="${r.type}" data-key="${r.key}" style="cursor:pointer">
+      <td>${r.title}</td><td><span class="badge ${r.type==='collection'?'badge-blue':'badge-orange'}">${r.type}</span></td>
+      <td>${fmtN(r.clicks)}</td><td>${fmtN(r.impressions)}</td><td>${r.ctr}%</td><td>${r.avg_position}</td>
+      ${market === 'All Markets' ? `<td>${r.market_count}</td><td>${fmtN(r.url_count)}</td>` : ''}
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('biz-table').innerHTML = html;
+  document.querySelectorAll('#biz-table .biz-row').forEach(tr => {
+    tr.addEventListener('click', () => selectBusinessArea(tr.dataset.type, tr.dataset.key));
+  });
+
+  const sel = document.getElementById('biz-detail-select');
+  if (sel.options.length <= 1) {
+    ba.areas.forEach(a => {
+      const o = document.createElement('option'); o.value = a.type + '|' + a.key;
+      o.textContent = `${a.title} (${a.type}, ${fmtN(a.clicks)} clicks)`; sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => {
+      const [type, key] = e.target.value.split('|');
+      if (type && key) selectBusinessArea(type, key);
+    });
+    if (ba.areas.length) selectBusinessArea(ba.areas[0].type, ba.areas[0].key);
+  }
+}
+
+function selectBusinessArea(type, key) {
+  bizDetailCurrent = type + '|' + key;
+  document.getElementById('biz-detail-select').value = bizDetailCurrent;
+  const ba = DATA.business_areas;
+  if (!ba || !type || !key) return;
+
+  const overall = ba.areas.find(a => a.type === type && a.key === key);
+  const marketRows = ba.area_market.filter(r => r.type === type && r.key === key).sort((a,b)=>b.clicks-a.clicks);
+
+  if (overall) {
+    document.getElementById('biz-detail-kpis').innerHTML = `
+      <div class="kpi-row" style="margin:12px 0">
+        <div class="kpi"><div class="label">Clicks</div><div class="value green">${fmtN(overall.clicks)}</div></div>
+        <div class="kpi"><div class="label">Impressions</div><div class="value blue">${fmtN(overall.impressions)}</div></div>
+        <div class="kpi"><div class="label">CTR</div><div class="value cyan">${overall.ctr}%</div></div>
+        <div class="kpi"><div class="label">Avg Position</div><div class="value orange">${overall.avg_position}</div></div>
+        <div class="kpi"><div class="label">Markets</div><div class="value pink">${overall.market_count}</div></div>
+        <div class="kpi"><div class="label">URLs</div><div class="value purple">${fmtN(overall.url_count)}</div></div>
+      </div>`;
+  }
+
+  const topMarkets = marketRows.slice(0,20);
+  makeChart('chart-biz-markets', { type:'bar', data:{labels:topMarkets.map(m=>m.market),datasets:[
+    {label:'Clicks',data:topMarkets.map(m=>m.clicks),backgroundColor:'#22c55e'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3'},grid:{display:false}}}}});
+
+  let html = '<table><thead><tr><th>Market</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th><th>URLs</th></tr></thead><tbody>';
+  marketRows.forEach(r => {
+    html += `<tr><td>${r.market}</td><td>${fmtN(r.clicks)}</td><td>${fmtN(r.impressions)}</td><td>${r.ctr}%</td><td>${r.avg_position}</td><td>${r.url_count}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('biz-detail-markets').innerHTML = html;
 }
 
 // ═══════════════════════════════════════════

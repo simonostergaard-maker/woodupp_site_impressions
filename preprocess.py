@@ -343,6 +343,156 @@ def generate_url_performance(df):
     return result
 
 
+# ─── Business Areas (cross-market URL grouping) ───
+#
+# GSC gives every market's URLs separately (woodupp.fr/collections/paravents,
+# woodupp.dk/collections/rumdelere, ... are all "different" URLs to GSC),
+# but they're the same collection page in different languages. This groups
+# them back into one "business area" so performance can be compared across
+# markets for a single collection or product.
+#
+# Products need no mapping: their slugs are the same in every market (confirmed
+# with the site owner), so the canonical key is just the path itself once any
+# market-specific prefix (the US market's "/us", or the French-language
+# subpath on Belgium/Switzerland) is stripped.
+#
+# Collections DO need a mapping, since their handles are translated per
+# market — that comes from data/collection_url_map.json (see
+# build_collection_map.py), generated from a Shopify translations export.
+# If that file isn't present, product grouping still works; collections are
+# simply skipped rather than the whole feature failing.
+
+BUSINESS_AREA_MAX_ROWS = 3000  # ceiling on distinct business areas kept, by clicks
+
+# The US market's domain is "woodupp.com/us" (not its own domain like every
+# other market), so its paths carry a real "/us" prefix that must be
+# stripped before comparing against other markets' paths.
+MARKET_URL_PREFIX = {"us": "us"}
+# Storefronts with a live "/fr/..." language subpath alongside a different
+# default-language storefront at the market root (confirmed with the site
+# owner: Belgium is Dutch by default, Switzerland is German by default).
+SUBPATH_LANGUAGE_MARKETS = {"be", "ch"}
+
+
+def load_collection_url_map():
+    path = DATA_DIR / "collection_url_map.json"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("collections", {})
+
+
+def build_collection_reverse_map(collections_map):
+    """(market, variant, localized_handle) -> (canonical_handle, title)."""
+    reverse = {}
+    for canonical, info in collections_map.items():
+        title = info.get("title", canonical)
+        for market, variants in info.get("markets", {}).items():
+            for variant, handle in variants.items():
+                reverse[(market, variant, handle)] = (canonical, title)
+    return reverse
+
+
+def strip_market_prefix(market, path):
+    """Remove a market's known root-path prefix, returning (remaining
+    segments, is_fr_subpath)."""
+    parts = [p for p in path.split("/") if p]
+    prefix = MARKET_URL_PREFIX.get(market)
+    if prefix and parts and parts[0] == prefix:
+        parts = parts[1:]
+    is_fr = False
+    if market in SUBPATH_LANGUAGE_MARKETS and parts and parts[0] == "fr":
+        is_fr = True
+        parts = parts[1:]
+    return parts, is_fr
+
+
+def classify_url(market, path, collection_reverse_map):
+    """Return (area_type, canonical_key, title) for a URL path, or
+    (None, None, None) if it isn't a collection or product page."""
+    parts, is_fr = strip_market_prefix(market, path)
+    if len(parts) >= 2 and parts[0] == "collections":
+        variant = "fr" if is_fr else "default"
+        found = collection_reverse_map.get((market, variant, parts[1]))
+        if found:
+            canonical, title = found
+            return "collection", canonical, title
+        return None, None, None
+    if len(parts) >= 2 and parts[0] == "products":
+        canonical = "/" + "/".join(parts)
+        return "product", canonical, canonical
+    return None, None, None
+
+
+def generate_business_areas(df):
+    collections_map = load_collection_url_map()
+    reverse_map = build_collection_reverse_map(collections_map) if collections_map else {}
+
+    # Matching uses the raw short country_code (the collection map and the
+    # market-prefix tables are keyed by that, e.g. "fr"/"us"/"ch"), but the
+    # rest of the app (and the rows we join back into) key everything by the
+    # readable market name (e.g. "France") — so carry both.
+    unique_paths = df[["country_code", "market", "url_path"]].drop_duplicates()
+    records = []
+    for row in unique_paths.itertuples(index=False):
+        area_type, key, title = classify_url(row.country_code, row.url_path, reverse_map)
+        if area_type:
+            records.append((row.market, row.url_path, area_type, key, title))
+    if not records:
+        return {"insufficient_data": True}
+
+    class_df = pd.DataFrame(records, columns=["market", "url_path", "area_type", "area_key", "title"])
+    merged = df.merge(class_df, on=["market", "url_path"], how="inner")
+
+    by_market = merged.groupby(["area_type", "area_key", "market"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), url_count=("url", "nunique"),
+    ).reset_index()
+    by_market["avg_position"] = (by_market["sum_position"] / by_market["impressions"]).round(1)
+    by_market["ctr"] = (by_market["clicks"] / by_market["impressions"] * 100).round(2)
+
+    titles = class_df.drop_duplicates(["area_type", "area_key"]).set_index(["area_type", "area_key"])["title"]
+
+    overall = by_market.groupby(["area_type", "area_key"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        sum_position=("sum_position", "sum"), market_count=("market", "nunique"),
+        url_count=("url_count", "sum"),
+    ).reset_index()
+    overall["avg_position"] = (overall["sum_position"] / overall["impressions"]).round(1)
+    overall["ctr"] = (overall["clicks"] / overall["impressions"] * 100).round(2)
+    overall = overall.sort_values("clicks", ascending=False).head(BUSINESS_AREA_MAX_ROWS)
+    kept_keys = set(zip(overall["area_type"], overall["area_key"]))
+
+    areas_out = [{
+        "type": row["area_type"], "key": row["area_key"],
+        "title": titles.get((row["area_type"], row["area_key"]), row["area_key"]),
+        "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
+        "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
+        "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+        "market_count": int(row["market_count"]), "url_count": int(row["url_count"]),
+    } for _, row in overall.iterrows()]
+
+    by_market = by_market[by_market.apply(lambda r: (r["area_type"], r["area_key"]) in kept_keys, axis=1)]
+    area_market_out = [{
+        "type": row["area_type"], "key": row["area_key"], "market": row["market"],
+        "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
+        "ctr": float(row["ctr"]) if pd.notna(row["ctr"]) else 0,
+        "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+        "url_count": int(row["url_count"]),
+    } for _, row in by_market.sort_values("clicks", ascending=False).iterrows()]
+
+    print(f"  Business areas: {len(areas_out)} ({sum(1 for a in areas_out if a['type']=='collection')} collections, "
+          f"{sum(1 for a in areas_out if a['type']=='product')} products) from {len(unique_paths):,} unique URLs"
+          + ("" if collections_map else " — no collection_url_map.json, collections not grouped"))
+
+    return {
+        "has_collection_mapping": bool(collections_map),
+        "areas": areas_out,
+        "area_market": area_market_out,
+    }
+
+
 def generate_keyword_performance(df):
     kw_df = df[(~df["is_anonymized_query"]) & (df["query"].notna()) & (df["query"] != "")]
 
@@ -667,13 +817,26 @@ BRAND_RE = re.compile(r"woodupp|wood\s*-?\s*up", re.IGNORECASE)
 def generate_brand_analysis(df):
     """Generate brand vs non-brand analysis from the GSC URL impressions data."""
     kw_df = df[df["query"].notna() & (df["query"] != "")].copy()
-    kw_df["is_brand"] = kw_df["query"].apply(lambda q: bool(BRAND_RE.search(q)))
     anon_df = df[df["is_anonymized_query"] | df["query"].isna() | (df["query"] == "")]
 
-    brand = kw_df[kw_df["is_brand"]]
-    nonbrand = kw_df[~kw_df["is_brand"]]
+    if kw_df.empty:
+        # Boolean-indexing an already-zero-row DataFrame can drop all its
+        # columns in this pandas version — reuse kw_df itself (still has the
+        # right columns, just no rows) rather than re-subsetting an empty
+        # frame, so every downstream .groupby("query") etc. still works.
+        brand = kw_df
+        nonbrand = kw_df
+    else:
+        kw_df["is_brand"] = kw_df["query"].apply(lambda q: bool(BRAND_RE.search(q)))
+        brand = kw_df[kw_df["is_brand"]]
+        nonbrand = kw_df[~kw_df["is_brand"]]
 
     def agg_stats(sub):
+        # A zero-row slice of a zero-row DataFrame can come back with no
+        # columns at all in this pandas version (seen when the CSV has no
+        # non-anonymized queries whatsoever) — guard rather than KeyError.
+        if "impressions" not in sub.columns:
+            return {"impressions": 0, "clicks": 0, "queries": 0, "avg_position": 0, "ctr": 0}
         imp = int(sub["impressions"].sum())
         clk = int(sub["clicks"].sum())
         return {
@@ -1480,6 +1643,7 @@ def generate_html(all_data):
         "keyword_performance", "country_data", "device_search",
         "serp_features", "url_daily", "keyword_daily",
         "movers", "monthly_trend", "brand_analysis", "keyword_themes",
+        "business_areas",
     ]
     lines = []
     for key in data_keys:
@@ -1556,11 +1720,16 @@ def main():
         print("Generating keyword theme analysis...")
         all_data["keyword_themes"] = generate_keyword_themes(df)
 
+        # Cross-market business area grouping (collections + products)
+        print("Generating business area analysis...")
+        all_data["business_areas"] = generate_business_areas(df)
+
     elif historical:
         print(f"\nCSV not found at {csv_path}, using historical data only.")
         all_data = historical
         all_data["movers"] = {"insufficient_data": True}
         all_data["keyword_themes"] = {"insufficient_data": True}
+        all_data["business_areas"] = {"insufficient_data": True}
         all_data["monthly_trend"] = generate_monthly_trend(
             pd.DataFrame(), historical_monthly
         ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
