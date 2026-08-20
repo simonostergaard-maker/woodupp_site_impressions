@@ -1218,13 +1218,63 @@ def tokenize_query(query):
     return [t for t in toks if len(t) >= 2 and t not in STOPWORDS and t not in BRAND_TOKENS]
 
 
-def theme_candidates(tokens):
+def theme_candidates(tokens, aliases=None):
     """Unigrams + adjacent-token bigrams, e.g. ['oak','dining','table'] ->
-    {'oak','dining','table','oak dining','dining table'}."""
+    {'oak','dining','table','oak dining','dining table'}. If a token has a
+    cross-language alias (see build_theme_aliases), the canonical alias is
+    added too, so e.g. a German query containing 'raumteiler' also
+    contributes to the same theme as an English query containing 'room
+    dividers' — without replacing the language-specific theme, so both are
+    still browsable individually."""
     themes = set(tokens)
     for i in range(len(tokens) - 1):
         themes.add(f"{tokens[i]} {tokens[i+1]}")
+    if aliases:
+        for t in tokens:
+            alias = aliases.get(t)
+            if alias:
+                themes.add(alias)
     return themes
+
+
+def build_theme_aliases(collections_map):
+    """Cross-language synonym aliases for the theme engine, derived from the
+    collection URL mapping: German 'raumteiler', Danish 'rumdelere', Swedish
+    'rumsavdelare', French 'paravents' etc. all alias to the collection's
+    English title ('room dividers'), so the same business concept groups
+    into one theme across markets instead of splintering by language.
+
+    Only unambiguous tokens are kept — a word that shows up across several
+    different collections' handles/titles (e.g. a generic "table") isn't
+    aliased to any single one of them, since that would wrongly merge
+    unrelated themes rather than correctly merge the same one."""
+    if not collections_map:
+        return {}
+    # Generic ecommerce/navigation words that happen to be a unique
+    # substring of exactly one collection's handle *today* (e.g.
+    # "akupixel-collection" makes "collection" technically unambiguous),
+    # but are common enough in ordinary queries out of context that
+    # aliasing them risks merging unrelated keywords into the wrong theme.
+    GENERIC_TOKEN_DENYLIST = {"home", "page", "shop", "new", "collection", "collections"}
+    token_to_labels = defaultdict(set)
+    for info in collections_map.values():
+        title = (info.get("title") or "").strip()
+        if not title:
+            continue
+        label = re.sub(r"\s+", " ", title.lower()).strip()
+        handle_tokens = set(tokenize_query(title))
+        for variants in info.get("markets", {}).values():
+            for handle in variants.values():
+                # Same stopword/brand filtering as real queries — a raw
+                # regex split alone let short function words through (e.g.
+                # Spanish "por", French "mais" turning up inside translated
+                # handles) as false-positive aliases.
+                raw_tokens = THEME_TOKEN_RE.findall(handle.lower())
+                handle_tokens.update(t for t in raw_tokens if t not in STOPWORDS and t not in BRAND_TOKENS)
+        for tok in handle_tokens:
+            if len(tok) >= 4 and tok not in GENERIC_TOKEN_DENYLIST:
+                token_to_labels[tok].add(label)
+    return {tok: next(iter(labels)) for tok, labels in token_to_labels.items() if len(labels) == 1}
 
 
 def generate_keyword_themes(df):
@@ -1236,7 +1286,8 @@ def generate_keyword_themes(df):
         return {"insufficient_data": True}
 
     unique_queries = kw_df["query"].unique()
-    query_themes = {q: theme_candidates(tokenize_query(q)) for q in unique_queries}
+    theme_aliases = build_theme_aliases(load_collection_url_map())
+    query_themes = {q: theme_candidates(tokenize_query(q), theme_aliases) for q in unique_queries}
 
     query_totals = kw_df.groupby("query")["impressions"].sum()
     theme_support = defaultdict(int)
