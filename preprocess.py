@@ -486,10 +486,82 @@ def generate_business_areas(df):
           f"{sum(1 for a in areas_out if a['type']=='product')} products) from {len(unique_paths):,} unique URLs"
           + ("" if collections_map else " — no collection_url_map.json, collections not grouped"))
 
+    # ── Recent-vs-prior movers, per area+market and per area overall ──
+    # Same rolling-window / calendar-MoM dual comparison used by SERP
+    # features and keyword themes, restricted to the areas that made the
+    # BUSINESS_AREA_MAX_ROWS cut above (so the comparison never surfaces an
+    # area the summary table itself doesn't show).
+    kept_ids = {f"{t}|{k}" for t, k in kept_keys}
+    merged["area_id"] = merged["area_type"] + "|" + merged["area_key"]
+
+    def period_stats(date_set, group_cols):
+        sub = merged[merged["data_date"].isin(date_set) & merged["area_id"].isin(kept_ids)]
+        return sub.groupby(group_cols).agg(
+            impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+            sum_position=("sum_position", "sum"),
+        ).reset_index()
+
+    def area_deltas(cur, pri, group_cols):
+        joined = cur.merge(pri, on=group_cols, how="outer", suffixes=("_r", "_p")).fillna(0)
+        recs = []
+        for _, row in joined.iterrows():
+            imp_r, imp_p = row["impressions_r"], row["impressions_p"]
+            clk_r, clk_p = row["clicks_r"], row["clicks_p"]
+            pos_r = round(row["sum_position_r"] / imp_r, 1) if imp_r > 0 else 0
+            pos_p = round(row["sum_position_p"] / imp_p, 1) if imp_p > 0 else 0
+            rec = {c: row[c] for c in group_cols}
+            rec.update({
+                "clicks_recent": int(clk_r), "clicks_prior": int(clk_p),
+                "clicks_change": int(clk_r - clk_p),
+                "clicks_pct": round((clk_r - clk_p) / clk_p * 100, 1) if clk_p > 0 else None,
+                "imp_recent": int(imp_r), "imp_prior": int(imp_p),
+                "imp_change": int(imp_r - imp_p),
+                "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else None,
+                "pos_recent": float(pos_r), "pos_prior": float(pos_p),
+                "pos_change": round(pos_r - pos_p, 1) if pos_r > 0 and pos_p > 0 else 0,
+                "is_new": bool(imp_p == 0 and imp_r > 0),
+                "is_gone": bool(imp_p > 0 and imp_r == 0),
+            })
+            recs.append(rec)
+        recs.sort(key=lambda r: r["clicks_change"], reverse=True)
+        return recs
+
+    def period_comparison(cur_dates, pri_dates, cur_label, pri_label):
+        cur_overall = period_stats(cur_dates, ["area_type", "area_key"])
+        pri_overall = period_stats(pri_dates, ["area_type", "area_key"])
+        cur_market = period_stats(cur_dates, ["area_type", "area_key", "market"])
+        pri_market = period_stats(pri_dates, ["area_type", "area_key", "market"])
+        return {
+            "period_recent": cur_label, "period_prior": pri_label,
+            "overall": area_deltas(cur_overall, pri_overall, ["area_type", "area_key"]),
+            "by_market": area_deltas(cur_market, pri_market, ["area_type", "area_key", "market"]),
+        }
+
+    dates = sorted(df["data_date"].unique())
+    n = len(dates)
+    movers = {"insufficient_data": True}
+    if n >= 14:
+        split = min(28, n // 2)
+        recent_dates = set(dates[-split:])
+        prior_dates = set(dates[-split * 2:-split])
+        if prior_dates:
+            movers = period_comparison(
+                recent_dates, prior_dates,
+                f"{min(recent_dates)} to {max(recent_dates)}", f"{min(prior_dates)} to {max(prior_dates)}")
+            movers["split_days"] = split
+
+    calendar_mom = {"insufficient_data": True}
+    cal = calendar_mom_dates(dates)
+    if cal:
+        cur_dates, pri_dates, cur_label, pri_label = cal
+        calendar_mom = period_comparison(cur_dates, pri_dates, cur_label, pri_label)
+
     return {
         "has_collection_mapping": bool(collections_map),
         "areas": areas_out,
         "area_market": area_market_out,
+        "movers": movers,
+        "calendar_mom": calendar_mom,
     }
 
 
