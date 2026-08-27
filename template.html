@@ -379,6 +379,7 @@ select:focus, input:focus { border-color: var(--accent); }
       <h3>Theme Detail</h3>
       <select id="theme-detail-select" style="margin-bottom:10px"><option value="">Select a theme to inspect...</option></select>
       <div id="theme-detail-kpis"></div>
+      <div id="theme-detail-compare" class="card" style="padding:10px 18px;font-size:13px;color:var(--muted);margin:0 0 16px"></div>
       <div class="grid-2">
         <div class="card" style="margin:0"><h3>Weekly Trend</h3><div class="chart-container" id="chart-theme-trend"></div></div>
         <div class="card" style="margin:0"><h3>Performance by Market</h3><div class="chart-container" id="chart-theme-markets"></div></div>
@@ -410,11 +411,25 @@ select:focus, input:focus { border-color: var(--accent); }
       </div>
     </div>
     <div id="biz-kpis"></div>
+    <div class="filters" style="margin-bottom:8px">
+      <div class="filter-group"><label>Trend Period</label>
+        <select id="biz-trend-period">
+          <option value="rolling">Rolling (most recent period)</option>
+          <option value="mom">Last Full Month vs Previous Month</option>
+        </select>
+      </div>
+      <div class="filter-group"><label>&nbsp;</label><span id="biz-trend-period-label" style="font-size:12px;color:var(--muted);padding-top:7px"></span></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>&#x1F4C8; Top Trending Up</h3><div class="table-wrap" id="biz-trending-up"></div></div>
+      <div class="card"><h3>&#x1F4C9; Top Trending Down</h3><div class="table-wrap" id="biz-trending-down"></div></div>
+    </div>
     <div class="card"><h3>Business Areas</h3><div class="table-wrap" id="biz-table"></div></div>
     <div class="card">
       <h3>Business Area Detail</h3>
       <select id="biz-detail-select" style="margin-bottom:10px"><option value="">Select a business area to inspect...</option></select>
       <div id="biz-detail-kpis"></div>
+      <div id="biz-detail-compare" class="card" style="padding:10px 18px;font-size:13px;color:var(--muted);margin:0 0 16px"></div>
       <div class="card" style="margin:0"><h3>Performance by Market</h3><div class="chart-container" id="chart-biz-markets"></div></div>
       <div class="card" style="margin-top:16px;margin-bottom:0"><h3>Per-Market Breakdown</h3><div class="table-wrap" id="biz-detail-markets"></div></div>
     </div>
@@ -547,12 +562,19 @@ function initApp() {
   document.getElementById('theme-sort').addEventListener('change', renderThemes);
   document.getElementById('theme-search').addEventListener('input', renderThemes);
   document.getElementById('theme-type-filter').addEventListener('change', renderThemes);
-  document.getElementById('theme-trend-period').addEventListener('change', renderThemes);
+  document.getElementById('theme-trend-period').addEventListener('change', () => {
+    renderThemes();
+    if (themeDetailCurrent) selectTheme(themeDetailCurrent);
+  });
   renderBusinessAreas();
   document.getElementById('biz-market-filter').addEventListener('change', renderBusinessAreas);
   document.getElementById('biz-sort').addEventListener('change', renderBusinessAreas);
   document.getElementById('biz-search').addEventListener('input', renderBusinessAreas);
   document.getElementById('biz-type-filter').addEventListener('change', renderBusinessAreas);
+  document.getElementById('biz-trend-period').addEventListener('change', () => {
+    renderBusinessAreas();
+    if (bizDetailCurrent) { const [t,k] = bizDetailCurrent.split('|'); selectBusinessArea(t,k); }
+  });
 }
 
 function populateFilters() {
@@ -1688,6 +1710,28 @@ function selectTheme(theme) {
       </div>`;
   }
 
+  // Comparison vs prior period, using the same trend-period toggle as the Top Trending Up/Down tables above
+  const trendPeriod = document.getElementById('theme-trend-period').value;
+  const mv = trendPeriod === 'mom' ? kt.calendar_mom : kt.movers;
+  const compareEl = document.getElementById('theme-detail-compare');
+  if (compareEl) {
+    if (!mv || mv.insufficient_data) {
+      compareEl.innerHTML = trendPeriod === 'mom'
+        ? 'Need at least two full calendar months of data for a month-over-month comparison.'
+        : 'Need at least 14 days of data for trend comparison.';
+    } else {
+      const cmp = mv.theme_overall_movers.find(r => r.theme === theme);
+      const periodRecent = trendPeriod === 'mom' ? mv.period_current : mv.period_recent;
+      if (cmp) {
+        const clickCls = cmp.clicks_change >= 0 ? 'up' : 'down';
+        const impCls = cmp.imp_change >= 0 ? 'up' : 'down';
+        compareEl.innerHTML = `<strong>${periodRecent}</strong> vs <strong>${mv.period_prior}</strong> &nbsp;|&nbsp; Clicks <span class="delta ${clickCls}">${cmp.clicks_change>=0?'+':''}${fmtN(cmp.clicks_change)} (${cmp.clicks_pct>0?'+':''}${cmp.clicks_pct}%)</span> &nbsp;|&nbsp; Impressions <span class="delta ${impCls}">${cmp.imp_change>=0?'+':''}${fmtN(cmp.imp_change)} (${cmp.imp_pct>0?'+':''}${cmp.imp_pct}%)</span>`;
+      } else {
+        compareEl.innerHTML = 'No comparable prior-period data for this theme (below the minimum impression threshold).';
+      }
+    }
+  }
+
   const weekly = (kt.trend_weekly && kt.trend_weekly[theme]) || {};
   const weeks = Object.keys(weekly).sort();
   makeChart('chart-theme-trend', { type:'line', data:{labels:weeks.map(w=>w.slice(5)),datasets:[
@@ -1755,6 +1799,44 @@ function renderBusinessAreas() {
     </div>
     ${ba.has_collection_mapping ? '' : '<div class="card" style="color:var(--muted);font-size:13px;margin-bottom:16px">No collection_url_map.json found — collections aren\'t grouped across markets yet, only products (which need no mapping). Run build_collection_map.py against a Shopify translations export to enable it.</div>'}`;
 
+  // Growing / Declining, respecting the market filter and trend-period toggle
+  const trendPeriod = document.getElementById('biz-trend-period').value;
+  const mv = trendPeriod === 'mom' ? ba.calendar_mom : ba.movers;
+  const upEl = document.getElementById('biz-trending-up');
+  const downEl = document.getElementById('biz-trending-down');
+  const trendLabelEl = document.getElementById('biz-trend-period-label');
+
+  function areaMoverTable(list, isUp) {
+    if (!list.length) return '<p style="color:var(--muted);padding:10px">No significant movers</p>';
+    let h = '<table><thead><tr><th>Business Area</th>' + (market === 'All Markets' ? '' : '<th>Market</th>') +
+      '<th>Clicks (Recent)</th><th>Clicks (Prior)</th><th>% Change</th><th>Impressions</th><th>Status</th></tr></thead><tbody>';
+    list.forEach(r => {
+      const title = (areaMeta[r.area_type + '|' + r.area_key] || {}).title || r.area_key;
+      const cls = isUp ? 'delta up' : 'delta down';
+      const status = r.is_new ? '<span class="badge badge-blue">New</span>' : r.is_gone ? '<span class="badge badge-orange">Gone</span>' : '';
+      h += `<tr><td>${title}</td>${market === 'All Markets' ? '' : `<td style="color:var(--muted)">${r.market}</td>`}
+        <td>${fmtN(r.clicks_recent)}</td><td>${fmtN(r.clicks_prior)}</td>
+        <td><span class="${cls}">${r.clicks_pct===null ? '—' : (r.clicks_pct>0?'+':'')+r.clicks_pct+'%'}</span></td>
+        <td>${fmtN(r.imp_recent)}</td><td>${status}</td></tr>`;
+    });
+    return h + '</tbody></table>';
+  }
+
+  if (!mv || mv.insufficient_data) {
+    trendLabelEl.textContent = '';
+    const msg = trendPeriod === 'mom'
+      ? '<p style="color:var(--muted);padding:10px">Need at least two full calendar months of data for a month-over-month comparison.</p>'
+      : '<p style="color:var(--muted);padding:10px">Need at least 14 days of data for trend comparison.</p>';
+    upEl.innerHTML = msg; downEl.innerHTML = msg;
+  } else {
+    const source = market === 'All Markets' ? mv.overall : mv.by_market.filter(r => r.market === market);
+    const gaining = source.filter(r => r.clicks_change > 0).sort((a,b) => b.clicks_change - a.clicks_change).slice(0, 15);
+    const losing = source.filter(r => r.clicks_change < 0).sort((a,b) => a.clicks_change - b.clicks_change).slice(0, 15);
+    upEl.innerHTML = areaMoverTable(gaining, true);
+    downEl.innerHTML = areaMoverTable(losing, false);
+    trendLabelEl.textContent = `${mv.period_recent} vs ${mv.period_prior}`;
+  }
+
   let html = '<table><thead><tr><th>Business Area</th><th>Type</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Avg Pos</th>' +
     (market === 'All Markets' ? '<th>Markets</th><th>URLs</th>' : '') + '</tr></thead><tbody>';
   rows.forEach(r => {
@@ -1803,6 +1885,26 @@ function selectBusinessArea(type, key) {
         <div class="kpi"><div class="label">Markets</div><div class="value pink">${overall.market_count}</div></div>
         <div class="kpi"><div class="label">URLs</div><div class="value purple">${fmtN(overall.url_count)}</div></div>
       </div>`;
+  }
+
+  // Comparison vs prior period, using the same trend-period toggle as the Growing/Declining tables above
+  const trendPeriod = document.getElementById('biz-trend-period').value;
+  const mv = trendPeriod === 'mom' ? ba.calendar_mom : ba.movers;
+  const compareEl = document.getElementById('biz-detail-compare');
+  if (!mv || mv.insufficient_data) {
+    compareEl.innerHTML = trendPeriod === 'mom'
+      ? 'Need at least two full calendar months of data for a month-over-month comparison.'
+      : 'Need at least 14 days of data for trend comparison.';
+  } else {
+    const cmp = mv.overall.find(r => r.area_type === type && r.area_key === key);
+    if (cmp) {
+      const clickCls = cmp.clicks_change >= 0 ? 'up' : 'down';
+      const impCls = cmp.imp_change >= 0 ? 'up' : 'down';
+      const status = cmp.is_new ? ' <span class="badge badge-blue">New this period</span>' : cmp.is_gone ? ' <span class="badge badge-orange">No longer appearing</span>' : '';
+      compareEl.innerHTML = `<strong>${mv.period_recent}</strong> vs <strong>${mv.period_prior}</strong> &nbsp;|&nbsp; Clicks <span class="delta ${clickCls}">${cmp.clicks_change>=0?'+':''}${fmtN(cmp.clicks_change)} (${cmp.clicks_pct===null?'—':(cmp.clicks_pct>0?'+':'')+cmp.clicks_pct+'%'})</span> &nbsp;|&nbsp; Impressions <span class="delta ${impCls}">${cmp.imp_change>=0?'+':''}${fmtN(cmp.imp_change)} (${cmp.imp_pct===null?'—':(cmp.imp_pct>0?'+':'')+cmp.imp_pct+'%'})</span>${status}`;
+    } else {
+      compareEl.innerHTML = 'No comparable prior-period data for this business area (below the minimum impression threshold, or too new).';
+    }
   }
 
   const topMarkets = marketRows.slice(0,20);
