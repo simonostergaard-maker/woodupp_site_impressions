@@ -23,6 +23,24 @@ SITE_TABLE       = f"{PROJECT_ID}.{DATASET_ID}.combined_site_impressions"
 URL_OUTPUT       = Path(__file__).parent / "data" / "woodupp_url_impressions.csv"
 SITE_OUTPUT      = Path(__file__).parent / "data" / "gsc_site_data.json"
 
+# GSC "search appearance" flags on combined_url_impressions (see
+# bigquery_add_eu_market.sql for the full table schema these come from).
+# preprocess.py's generate_serp_features() looks for columns starting with
+# "is_" (other than the two anonymization flags below) — keep this list in
+# sync with that table's columns if GSC ever adds new search-appearance types.
+SERP_FEATURE_COLUMNS = [
+    "is_amp_top_stories", "is_amp_blue_link", "is_job_listing", "is_job_details",
+    "is_tpf_qa", "is_tpf_faq", "is_tpf_howto", "is_weblite", "is_action",
+    "is_events_listing", "is_events_details", "is_forums",
+    "is_search_appearance_android_app", "is_amp_story", "is_amp_image_result",
+    "is_video", "is_organic_shopping", "is_review_snippet",
+    "is_special_announcement", "is_recipe_feature", "is_recipe_rich_snippet",
+    "is_subscribed_content", "is_page_experience", "is_practice_problems",
+    "is_math_solvers", "is_translated_result", "is_edu_q_and_a",
+    "is_product_snippets", "is_merchant_listings", "is_learning_videos",
+]
+_SERP_FEATURE_SELECT = ",\n    ".join(f"CAST({c} AS BOOL) AS {c}" for c in SERP_FEATURE_COLUMNS)
+
 URL_QUERY = f"""
 SELECT
     data_date,
@@ -36,7 +54,8 @@ SELECT
     query,
     country,
     device,
-    search_type
+    search_type,
+    {_SERP_FEATURE_SELECT}
 FROM `{URL_TABLE}`
 ORDER BY data_date, country_code
 """

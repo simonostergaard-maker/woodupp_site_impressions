@@ -461,11 +461,32 @@ select:focus, input:focus { border-color: var(--accent); }
 
   <!-- SERP FEATURES -->
   <div class="tab-content" id="tab-serp">
-    <div class="card"><h3>SERP Feature Presence (All Markets)</h3><div class="chart-container tall" id="chart-serp-bar"></div></div>
-    <div class="card"><h3>SERP Features Detail</h3><div class="table-wrap" id="serp-table"></div></div>
-    <div class="card"><h3>SERP Features by Market</h3>
-      <div class="filters"><div class="filter-group"><label>Market</label><select id="serp-market-filter"></select></div></div>
-      <div class="table-wrap" id="serp-market-table"></div>
+    <div class="filters">
+      <div class="filter-group"><label>Market</label><select id="serp-market-filter"><option value="All Markets">All Markets</option></select></div>
+      <div class="filter-group"><label>Period</label>
+        <select id="serp-period-filter">
+          <option value="rolling">Rolling (most recent period)</option>
+          <option value="mom">Last Full Month vs Previous Month</option>
+        </select>
+      </div>
+    </div>
+    <div id="serp-kpis"></div>
+    <div class="card"><h3>Weekly Trend by Feature <span style="font-size:11px;color:var(--muted);font-weight:400">(site-wide)</span></h3><div class="chart-container tall" id="chart-serp-trend"></div></div>
+    <div class="card"><h3>Feature Summary <span style="font-size:11px;color:var(--muted);font-weight:400">(CTR uplift vs site-wide average CTR)</span></h3><div class="table-wrap" id="serp-table"></div></div>
+    <div id="serp-period-label" class="card" style="padding:10px 18px;font-size:13px;color:var(--muted);margin-bottom:16px"></div>
+    <div class="grid-2">
+      <div class="card"><h3>&#x1F4C8; Growing</h3><div class="table-wrap" id="serp-trending-up"></div></div>
+      <div class="card"><h3>&#x1F4C9; Declining</h3><div class="table-wrap" id="serp-trending-down"></div></div>
+    </div>
+    <div class="card">
+      <h3>Feature Detail</h3>
+      <select id="serp-detail-select" style="margin-bottom:10px"><option value="">Select a SERP feature to inspect...</option></select>
+      <div id="serp-detail-kpis"></div>
+      <div class="grid-2">
+        <div class="card" style="margin:0"><h3>Weekly Trend by Market</h3><div class="chart-container" id="chart-serp-detail-trend"></div></div>
+        <div class="card" style="margin:0"><h3>Impressions by Market</h3><div class="chart-container" id="chart-serp-markets"></div></div>
+      </div>
+      <div class="card" style="margin-top:16px;margin-bottom:0"><h3>By Market</h3><div class="table-wrap" id="serp-detail-markets"></div></div>
     </div>
   </div>
 </div>
@@ -1301,36 +1322,153 @@ function runComparison() {
 // ═══════════════════════════════════════════
 // TAB 9: SERP FEATURES
 // ═══════════════════════════════════════════
+let serpDetailCurrent = '';
+
 function renderSerpFeatures() {
   const sf = DATA.serp_features;
+  if (!sf || sf.insufficient_data) {
+    document.getElementById('serp-kpis').innerHTML = '<div class="card" style="color:var(--muted)">No SERP feature data available — run extract_gsc.py and preprocess.py against a full CSV export.</div>';
+    document.getElementById('serp-table').innerHTML = '';
+    document.getElementById('serp-trending-up').innerHTML = '';
+    document.getElementById('serp-trending-down').innerHTML = '';
+    return;
+  }
 
-  // Bar chart
-  const features = Object.entries(sf.summary).sort((a,b) => b[1].rows - a[1].rows);
-  makeChart('chart-serp-bar', { type:'bar', data:{labels:features.map(f=>f[0]),datasets:[
-    {label:'Rows with Feature',data:features.map(f=>f[1].rows),backgroundColor:'#6366f180',borderColor:'#6366f1',borderWidth:1},
-  ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',font:{size:11}},grid:{display:false}}}}});
+  const market = document.getElementById('serp-market-filter').value;
+  const period = document.getElementById('serp-period-filter').value;
+
+  const rows = market === 'All Markets' ? sf.summary : sf.by_market.filter(r => r.market === market);
+  const sorted = [...rows].sort((a,b) => b.impressions - a.impressions);
+
+  const totalImpressions = sf.summary.reduce((s,f) => s+f.impressions, 0);
+  const totalClicks = sf.summary.reduce((s,f) => s+f.clicks, 0);
+  document.getElementById('serp-kpis').innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Active Features</div><div class="value blue">${fmtN(sf.summary.length)}</div></div>
+      <div class="kpi"><div class="label">Feature-Tagged Clicks</div><div class="value green">${fmt(totalClicks)}</div></div>
+      <div class="kpi"><div class="label">Feature-Tagged Impressions</div><div class="value cyan">${fmt(totalImpressions)}</div></div>
+      <div class="kpi"><div class="label">Site-Wide CTR</div><div class="value orange">${sf.site_ctr}%</div></div>
+    </div>`;
+
+  // Weekly trend, site-wide — top 8 features by impressions, plotted by clicks
+  const topFeatures = [...sf.summary].sort((a,b) => b.impressions - a.impressions).slice(0, 8).map(f => f.feature);
+  const trendWeeks = new Set();
+  topFeatures.forEach(f => Object.keys(sf.trend_weekly[f] || {}).forEach(w => trendWeeks.add(w)));
+  const weeks = [...trendWeeks].sort();
+  makeChart('chart-serp-trend', { type:'line', data:{labels:weeks.map(w=>w.slice(5)),datasets:topFeatures.map((f,i) => ({
+    label:f, data:weeks.map(w => (sf.trend_weekly[f]||{})[w]?.clicks || 0),
+    borderColor:COLORS[i%COLORS.length], tension:0.3, borderWidth:2, pointRadius:1,
+  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3',font:{size:10}}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 
   // Summary table
-  let html = '<table><thead><tr><th>Feature</th><th>Rows</th><th>Impressions</th><th>Clicks</th><th>CTR</th></tr></thead><tbody>';
-  features.forEach(([name,d]) => {
-    html += `<tr><td>${name}</td><td>${fmtN(d.rows)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td><td>${d.ctr}%</td></tr>`;
+  let html = '<table><thead><tr><th>Feature</th><th>Clicks</th><th>Impressions</th><th>CTR</th>' +
+    (market === 'All Markets' ? '<th>CTR Uplift</th><th>Markets</th>' : '') + '<th>Rows</th></tr></thead><tbody>';
+  sorted.forEach(r => {
+    html += `<tr class="serp-row" data-feature="${r.feature}" style="cursor:pointer">
+      <td>${r.feature}</td><td>${fmtN(r.clicks)}</td><td>${fmtN(r.impressions)}</td><td>${r.ctr}%</td>
+      ${market === 'All Markets' ? `<td><span class="delta ${r.ctr_uplift>=0?'up':'down'}">${r.ctr_uplift>0?'+':''}${r.ctr_uplift}pp</span></td><td>${r.market_count}</td>` : ''}
+      <td>${fmtN(r.rows)}</td>
+    </tr>`;
   });
   html += '</tbody></table>';
   document.getElementById('serp-table').innerHTML = html;
-
-  // Per market
-  document.getElementById('serp-market-filter').addEventListener('change', e => {
-    const m = e.target.value;
-    const mf = sf.by_market[m] || {};
-    const sorted = Object.entries(mf).sort((a,b) => b[1].rows - a[1].rows);
-    let h = '<table><thead><tr><th>Feature</th><th>Rows</th><th>Impressions</th><th>Clicks</th></tr></thead><tbody>';
-    sorted.forEach(([name,d]) => {
-      h += `<tr><td>${name}</td><td>${fmtN(d.rows)}</td><td>${fmtN(d.impressions)}</td><td>${fmtN(d.clicks)}</td></tr>`;
-    });
-    h += '</tbody></table>';
-    document.getElementById('serp-market-table').innerHTML = h;
+  document.querySelectorAll('#serp-table .serp-row').forEach(tr => {
+    tr.addEventListener('click', () => selectSerpFeature(tr.dataset.feature));
   });
+
+  // Growing / Declining, respecting the market filter and period toggle
+  const mv = period === 'mom' ? sf.calendar_mom : sf.movers;
+  const upEl = document.getElementById('serp-trending-up');
+  const downEl = document.getElementById('serp-trending-down');
+  const labelEl = document.getElementById('serp-period-label');
+
+  function moverTable(list, isUp) {
+    if (!list.length) return '<p style="color:var(--muted);padding:10px">No significant movers</p>';
+    let h = '<table><thead><tr><th>Feature</th>' + (market === 'All Markets' ? '' : '<th>Market</th>') +
+      '<th>Impressions (Recent)</th><th>Impressions (Prior)</th><th>% Change</th><th>Clicks (Recent)</th><th>Status</th></tr></thead><tbody>';
+    list.forEach(r => {
+      const cls = isUp ? 'delta up' : 'delta down';
+      const status = r.is_new ? '<span class="badge badge-blue">New</span>' : r.is_gone ? '<span class="badge badge-orange">Gone</span>' : '';
+      h += `<tr><td>${r.feature}</td>${market === 'All Markets' ? '' : `<td style="color:var(--muted)">${r.market}</td>`}
+        <td>${fmtN(r.imp_recent)}</td><td>${fmtN(r.imp_prior)}</td>
+        <td><span class="${cls}">${r.imp_pct===null ? '—' : (r.imp_pct>0?'+':'')+r.imp_pct+'%'}</span></td>
+        <td>${fmtN(r.clicks_recent)}</td><td>${status}</td></tr>`;
+    });
+    return h + '</tbody></table>';
+  }
+
+  if (!mv || mv.insufficient_data) {
+    labelEl.innerHTML = period === 'mom'
+      ? 'Need at least two full calendar months of data for a month-over-month comparison.'
+      : 'Need at least 14 days of data for trend comparison.';
+    upEl.innerHTML = ''; downEl.innerHTML = '';
+  } else {
+    const source = market === 'All Markets' ? mv.overall : mv.by_market.filter(r => r.market === market);
+    const gaining = source.filter(r => r.imp_change > 0).sort((a,b) => b.imp_change - a.imp_change).slice(0, 15);
+    const losing = source.filter(r => r.imp_change < 0).sort((a,b) => a.imp_change - b.imp_change).slice(0, 15);
+    upEl.innerHTML = moverTable(gaining, true);
+    downEl.innerHTML = moverTable(losing, false);
+    labelEl.innerHTML = period === 'mom'
+      ? `Comparing <strong>${mv.period_recent}</strong> vs <strong>${mv.period_prior}</strong> (calendar months)`
+      : `Comparing <strong>${mv.period_recent}</strong> vs <strong>${mv.period_prior}</strong> &nbsp;|&nbsp; ${mv.split_days}-day periods`;
+  }
+
+  // Populate the detail selector once, and show a default feature on first render
+  const sel = document.getElementById('serp-detail-select');
+  if (sel.options.length <= 1) {
+    sf.summary.forEach(f => {
+      const o = document.createElement('option'); o.value = f.feature;
+      o.textContent = `${f.feature} (${fmtN(f.impressions)} impr.)`; sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => selectSerpFeature(e.target.value));
+    if (sf.summary.length) selectSerpFeature(sf.summary[0].feature);
+  }
 }
+
+function selectSerpFeature(feature) {
+  serpDetailCurrent = feature;
+  document.getElementById('serp-detail-select').value = feature;
+  const sf = DATA.serp_features;
+  if (!feature || !sf) return;
+
+  const overall = sf.summary.find(f => f.feature === feature);
+  if (overall) {
+    document.getElementById('serp-detail-kpis').innerHTML = `
+      <div class="kpi-row" style="margin:12px 0">
+        <div class="kpi"><div class="label">Clicks</div><div class="value green">${fmtN(overall.clicks)}</div></div>
+        <div class="kpi"><div class="label">Impressions</div><div class="value blue">${fmtN(overall.impressions)}</div></div>
+        <div class="kpi"><div class="label">CTR</div><div class="value cyan">${overall.ctr}%</div></div>
+        <div class="kpi"><div class="label">CTR Uplift</div><div class="value ${overall.ctr_uplift>=0?'green':'orange'}">${overall.ctr_uplift>0?'+':''}${overall.ctr_uplift}pp</div></div>
+        <div class="kpi"><div class="label">Markets</div><div class="value purple">${overall.market_count}</div></div>
+        <div class="kpi"><div class="label">Rows</div><div class="value pink">${fmtN(overall.rows)}</div></div>
+      </div>`;
+  }
+
+  const marketTrend = (sf.trend_weekly_market && sf.trend_weekly_market[feature]) || {};
+  const trendMarkets = Object.keys(marketTrend);
+  const detailWeeks = new Set();
+  trendMarkets.forEach(m => Object.keys(marketTrend[m]).forEach(w => detailWeeks.add(w)));
+  const weeks = [...detailWeeks].sort();
+  makeChart('chart-serp-detail-trend', { type:'line', data:{labels:weeks.map(w=>w.slice(5)),datasets:trendMarkets.map((m,i) => ({
+    label:m, data:weeks.map(w => (marketTrend[m][w]||{}).clicks || 0),
+    borderColor:COLORS[i%COLORS.length], tension:0.3, borderWidth:2, pointRadius:1,
+  }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3',font:{size:10}}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
+
+  const byMarket = sf.by_market.filter(r => r.feature === feature).sort((a,b) => b.clicks - a.clicks);
+  makeChart('chart-serp-markets', { type:'bar', data:{labels:byMarket.map(m=>m.market),datasets:[
+    {label:'Impressions',data:byMarket.map(m=>m.impressions),backgroundColor:'#6366f1'},
+  ]}, options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3'},grid:{display:false}}}}});
+
+  let html = '<table><thead><tr><th>Market</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Rows</th></tr></thead><tbody>';
+  byMarket.forEach(m => {
+    html += `<tr><td>${m.market}</td><td>${fmtN(m.clicks)}</td><td>${fmtN(m.impressions)}</td><td>${m.ctr}%</td><td>${fmtN(m.rows)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('serp-detail-markets').innerHTML = html;
+}
+
+document.getElementById('serp-market-filter').addEventListener('change', renderSerpFeatures);
+document.getElementById('serp-period-filter').addEventListener('change', renderSerpFeatures);
 
 // ═══════════════════════════════════════════
 // TAB 10: MOVERS & SHAKERS
