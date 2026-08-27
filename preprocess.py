@@ -696,44 +696,155 @@ def generate_device_search_data(df):
     }
 
 
-def generate_search_features(df):
+def generate_serp_features(df):
+    """Deep-dive on GSC's "search appearance" flags (rich results, Merchant
+    Listings, Product Snippets, etc.): overall + per-market performance,
+    weekly trend, and both a rolling and a calendar-month-over-month
+    comparison — so "did we gain or lose a SERP feature" has a real,
+    quick answer instead of a static one-time snapshot."""
     feature_cols = [c for c in df.columns if c.startswith("is_") and c not in ["is_anonymized_query", "is_anonymized_discover"]]
+    if not feature_cols:
+        return {"insufficient_data": True}
 
-    feature_summary = {}
+    def feature_mask(col):
+        s = df[col]
+        return s if s.dtype == bool else s.astype(str).str.lower() == "true"
+
+    def label(col):
+        return col.replace("is_", "").replace("_", " ").title()
+
+    # Long format: one row per (original row, feature that was True on it).
+    # Far smaller than exploding every row by all 30 columns, since each
+    # feature is only active on a small slice of rows.
+    frames = []
     for col in feature_cols:
-        mask = df[col].astype(str).str.lower() == "true"
-        count = int(mask.sum())
-        if count > 0:
-            feature_name = col.replace("is_", "").replace("_", " ").title()
-            imp_sum = int(df.loc[mask, "impressions"].sum())
-            click_sum = int(df.loc[mask, "clicks"].sum())
-            feature_summary[feature_name] = {
-                "rows": count,
-                "impressions": imp_sum,
-                "clicks": click_sum,
-                "ctr": round(click_sum / imp_sum * 100, 2) if imp_sum > 0 else 0,
-            }
+        mask = feature_mask(col)
+        if not mask.any():
+            continue
+        sub = df.loc[mask, ["data_date", "market", "impressions", "clicks"]].copy()
+        sub["feature"] = label(col)
+        frames.append(sub)
+    if not frames:
+        return {"insufficient_data": True}
+    long_df = pd.concat(frames, ignore_index=True)
 
-    feature_by_market = {}
-    for market in df["market"].unique():
-        mdf = df[df["market"] == market]
-        market_features = {}
-        for col in feature_cols:
-            mask = mdf[col].astype(str).str.lower() == "true"
-            count = int(mask.sum())
-            if count > 0:
-                feature_name = col.replace("is_", "").replace("_", " ").title()
-                market_features[feature_name] = {
-                    "rows": count,
-                    "impressions": int(mdf.loc[mask, "impressions"].sum()),
-                    "clicks": int(mdf.loc[mask, "clicks"].sum()),
-                }
-        if market_features:
-            feature_by_market[market] = market_features
+    total_impressions = int(df["impressions"].sum())
+    total_clicks = int(df["clicks"].sum())
+    site_ctr = round(total_clicks / total_impressions * 100, 2) if total_impressions > 0 else 0
+
+    overall = long_df.groupby("feature").agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+        rows=("impressions", "count"), market_count=("market", "nunique"),
+    ).reset_index()
+    overall["ctr"] = (overall["clicks"] / overall["impressions"] * 100).round(2)
+    overall["ctr_uplift"] = (overall["ctr"] - site_ctr).round(2)
+    overall = overall.sort_values("impressions", ascending=False)
+
+    summary = [{
+        "feature": row["feature"], "rows": int(row["rows"]),
+        "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
+        "ctr": float(row["ctr"]), "ctr_uplift": float(row["ctr_uplift"]),
+        "market_count": int(row["market_count"]),
+    } for _, row in overall.iterrows()]
+
+    by_market_agg = long_df.groupby(["feature", "market"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"), rows=("impressions", "count"),
+    ).reset_index()
+    by_market_agg["ctr"] = (by_market_agg["clicks"] / by_market_agg["impressions"] * 100).round(2)
+    by_market = [{
+        "feature": row["feature"], "market": row["market"], "rows": int(row["rows"]),
+        "impressions": int(row["impressions"]), "clicks": int(row["clicks"]), "ctr": float(row["ctr"]),
+    } for _, row in by_market_agg.sort_values("impressions", ascending=False).iterrows()]
+
+    long_df["week"] = pd.to_datetime(long_df["data_date"]).dt.to_period("W-SUN").apply(
+        lambda p: p.start_time.strftime("%Y-%m-%d"))
+    week_agg = long_df.groupby(["feature", "week"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"), rows=("impressions", "count"),
+    ).reset_index()
+    trend_weekly = {}
+    for _, row in week_agg.iterrows():
+        trend_weekly.setdefault(row["feature"], {})[row["week"]] = {
+            "impressions": int(row["impressions"]), "clicks": int(row["clicks"]), "rows": int(row["rows"]),
+        }
+
+    # Same, split by market too — lets the per-feature drill-down show
+    # whether a market's presence is actually trending, not just a snapshot.
+    week_market_agg = long_df.groupby(["feature", "market", "week"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+    ).reset_index()
+    trend_weekly_market = {}
+    for _, row in week_market_agg.iterrows():
+        trend_weekly_market.setdefault(row["feature"], {}).setdefault(row["market"], {})[row["week"]] = {
+            "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
+        }
+
+    def period_comparison(cur_dates, pri_dates, cur_label, pri_label):
+        def agg(date_set, group_cols):
+            sub = long_df[long_df["data_date"].isin(date_set)]
+            return sub.groupby(group_cols).agg(
+                impressions=("impressions", "sum"), clicks=("clicks", "sum"), rows=("impressions", "count"),
+            ).reset_index()
+
+        def deltas(cur, pri, group_cols):
+            merged = cur.merge(pri, on=group_cols, how="outer", suffixes=("_r", "_p")).fillna(0)
+            recs = []
+            for _, row in merged.iterrows():
+                imp_r, imp_p = row["impressions_r"], row["impressions_p"]
+                rec = {c: row[c] for c in group_cols}
+                rec.update({
+                    "imp_recent": int(imp_r), "imp_prior": int(imp_p), "imp_change": int(imp_r - imp_p),
+                    "imp_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else None,
+                    "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+                    "clicks_change": int(row["clicks_r"] - row["clicks_p"]),
+                    "clicks_pct": round((row["clicks_r"] - row["clicks_p"]) / row["clicks_p"] * 100, 1) if row["clicks_p"] > 0 else None,
+                    "rows_recent": int(row["rows_r"]), "rows_prior": int(row["rows_p"]),
+                    "rows_change": int(row["rows_r"] - row["rows_p"]),
+                    "is_new": bool(imp_p == 0 and imp_r > 0),
+                    "is_gone": bool(imp_p > 0 and imp_r == 0),
+                })
+                recs.append(rec)
+            recs.sort(key=lambda r: r["imp_change"], reverse=True)
+            return recs
+
+        cur_overall = agg(cur_dates, ["feature"])
+        pri_overall = agg(pri_dates, ["feature"])
+        cur_market = agg(cur_dates, ["feature", "market"])
+        pri_market = agg(pri_dates, ["feature", "market"])
+        return {
+            "period_recent": cur_label, "period_prior": pri_label,
+            "overall": deltas(cur_overall, pri_overall, ["feature"]),
+            "by_market": deltas(cur_market, pri_market, ["feature", "market"]),
+        }
+
+    dates = sorted(df["data_date"].unique())
+    n = len(dates)
+    movers = {"insufficient_data": True}
+    if n >= 14:
+        split = min(28, n // 2)
+        recent_dates = set(dates[-split:])
+        prior_dates = set(dates[-split * 2:-split])
+        if prior_dates:
+            movers = period_comparison(
+                recent_dates, prior_dates,
+                f"{min(recent_dates)} to {max(recent_dates)}", f"{min(prior_dates)} to {max(prior_dates)}")
+            movers["split_days"] = split
+
+    calendar_mom = {"insufficient_data": True}
+    cal = calendar_mom_dates(dates)
+    if cal:
+        cur_dates, pri_dates, cur_label, pri_label = cal
+        calendar_mom = period_comparison(cur_dates, pri_dates, cur_label, pri_label)
+
+    print(f"  SERP features: {len(summary)} active feature types, {int(long_df.shape[0]):,} feature-tagged rows")
 
     return {
-        "summary": feature_summary,
-        "by_market": feature_by_market,
+        "site_ctr": site_ctr,
+        "summary": summary,
+        "by_market": by_market,
+        "trend_weekly": trend_weekly,
+        "trend_weekly_market": trend_weekly_market,
+        "movers": movers,
+        "calendar_mom": calendar_mom,
     }
 
 
@@ -1746,7 +1857,7 @@ def main():
             "keyword_performance": generate_keyword_performance(df),
             "country_data": generate_country_data(df),
             "device_search": generate_device_search_data(df),
-            "serp_features": generate_search_features(df),
+            "serp_features": generate_serp_features(df),
             "url_daily": generate_url_daily(df),
             "keyword_daily": generate_keyword_daily(df),
         }
@@ -1781,6 +1892,11 @@ def main():
         all_data["movers"] = {"insufficient_data": True}
         all_data["keyword_themes"] = {"insufficient_data": True}
         all_data["business_areas"] = {"insufficient_data": True}
+        # The frozen historical baseline's serp_features.json predates the
+        # richer shape generate_serp_features() now returns (weekly trend,
+        # movers, calendar_mom) — treat it as unavailable here rather than
+        # feeding the frontend a shape it doesn't expect.
+        all_data["serp_features"] = {"insufficient_data": True}
         all_data["monthly_trend"] = generate_monthly_trend(
             pd.DataFrame(), historical_monthly
         ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
