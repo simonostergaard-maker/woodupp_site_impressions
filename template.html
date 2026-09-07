@@ -285,7 +285,10 @@ select:focus, input:focus { border-color: var(--accent); }
       <div class="card"><h3>Daily Impressions by Device</h3><div class="chart-container" id="chart-device-daily"></div></div>
       <div class="card"><h3>Daily Impressions by Search Type</h3><div class="chart-container" id="chart-search-daily"></div></div>
     </div>
-    <div class="card"><h3>Device Performance by Market</h3><div class="table-wrap" id="device-market-table"></div></div>
+    <div class="card">
+      <h3>Search Type MoM by Market <span id="device-market-period" style="font-size:11px;color:var(--muted);font-weight:400"></span></h3>
+      <div class="table-wrap" id="device-market-table"></div>
+    </div>
   </div>
 
   <!-- DATE COMPARISON -->
@@ -1172,36 +1175,54 @@ function renderDevices() {
   const stLabels = Object.keys(searchData);
   makeChart('chart-search-pie', { type:'doughnut', data:{labels:stLabels,datasets:[{data:stLabels.map(s=>searchData[s].impressions),backgroundColor:['#3b82f6','#ec4899','#06b6d4']}]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}}}});
 
-  // Daily device
+  // Daily device — only over the dates device/search-type data actually
+  // exists for (GSC only started reporting this breakdown partway through
+  // the collection period), not the full overview date range, so the chart
+  // doesn't open with a long flat stretch of zeros.
   const dailyDev = ds.daily_device;
   const devices = ['DESKTOP','MOBILE','TABLET'];
-  makeChart('chart-device-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({
-    label:dev, data:dates.map(d=>dailyDev[d]?.[dev]?.impressions||0),
+  const deviceDates = Object.keys(dailyDev).sort();
+  makeChart('chart-device-daily', { type:'line', data:{labels:deviceDates.map(d=>d.slice(5)),datasets:devices.map((dev,i) => ({
+    label:dev, data:deviceDates.map(d=>dailyDev[d]?.[dev]?.impressions||0),
     borderColor:['#6366f1','#22c55e','#f59e0b'][i], tension:0.3, borderWidth:2, pointRadius:2,
   }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 
   // Daily search type
   const dailySt = ds.daily_search;
   const stypes = ['WEB','IMAGE','VIDEO'];
-  makeChart('chart-search-daily', { type:'line', data:{labels:dates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({
-    label:st, data:dates.map(d=>dailySt[d]?.[st]?.impressions||0),
+  const searchDates = Object.keys(dailySt).sort();
+  makeChart('chart-search-daily', { type:'line', data:{labels:searchDates.map(d=>d.slice(5)),datasets:stypes.map((st,i) => ({
+    label:st, data:searchDates.map(d=>dailySt[d]?.[st]?.impressions||0),
     borderColor:['#3b82f6','#ec4899','#06b6d4'][i], tension:0.3, borderWidth:2, pointRadius:2,
   }))}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,color:'#8b8fa3'}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{ticks:{color:'#8b8fa3',callback:v=>fmt(v)},grid:{color:'#2a2d3a'}}}}});
 
-  // Device by market table
-  const allMarkets = Object.keys(ds.by_market_device).sort();
-  let html = '<table><thead><tr><th>Market</th><th>Desktop Imp</th><th>Desktop CTR</th><th>Mobile Imp</th><th>Mobile CTR</th><th>Tablet Imp</th><th>Tablet CTR</th></tr></thead><tbody>';
-  allMarkets.forEach(m => {
-    const md = ds.by_market_device[m];
-    html += `<tr><td>${m}</td>`;
-    devices.forEach(dev => {
-      const d = md[dev] || {impressions:0,ctr:0};
-      html += `<td>${fmtN(d.impressions)}</td><td>${d.ctr||0}%</td>`;
+  // Search type MoM by market — is a market's Web/Image/Video presence
+  // actually growing, not just a static device split.
+  const mom = ds.search_type_mom;
+  const periodEl = document.getElementById('device-market-period');
+  const tableEl = document.getElementById('device-market-table');
+  if (!mom || mom.insufficient_data) {
+    periodEl.textContent = '';
+    tableEl.innerHTML = '<p style="color:var(--muted);padding:10px">Need at least two full calendar months of data for a month-over-month comparison.</p>';
+  } else {
+    periodEl.textContent = `(${mom.period_current} vs ${mom.period_prior})`;
+    const momMarkets = Object.keys(mom.by_market).sort();
+    let html = '<table><thead><tr><th>Market</th>' +
+      stypes.map(st => `<th>${st} Imp</th><th>${st} % Change</th>`).join('') + '</tr></thead><tbody>';
+    momMarkets.forEach(m => {
+      const md = mom.by_market[m];
+      html += `<tr><td>${m}</td>`;
+      stypes.forEach(st => {
+        const d = md[st] || {impressions_recent:0, impressions_pct:null};
+        const cls = d.impressions_pct === null ? '' : (d.impressions_pct >= 0 ? 'delta up' : 'delta down');
+        const pct = d.impressions_pct === null ? '—' : `${d.impressions_pct>0?'+':''}${d.impressions_pct}%`;
+        html += `<td>${fmtN(d.impressions_recent)}</td><td><span class="${cls}">${pct}</span></td>`;
+      });
+      html += '</tr>';
     });
-    html += '</tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById('device-market-table').innerHTML = html;
+    html += '</tbody></table>';
+    tableEl.innerHTML = html;
+  }
 }
 document.getElementById('dev-market-filter').addEventListener('change', renderDevices);
 
