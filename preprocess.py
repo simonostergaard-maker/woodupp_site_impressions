@@ -760,9 +760,44 @@ def generate_device_search_data(df):
             "clicks": int(row["clicks"]),
         }
 
+    # ── Month-over-month impressions per market, split by search type ──
+    # "Is this market's Web/Image/Video presence actually growing" is a more
+    # useful question than a static device breakdown, which never changes
+    # meaningfully month to month.
+    dates = sorted(df["data_date"].unique())
+    search_type_mom = {"insufficient_data": True}
+    cal = calendar_mom_dates(dates)
+    if cal:
+        cur_dates, pri_dates, cur_label, pri_label = cal
+
+        def agg_search_type(date_set):
+            sub = df[df["data_date"].isin(date_set)]
+            return sub.groupby(["market", "search_type"]).agg(
+                impressions=("impressions", "sum"), clicks=("clicks", "sum"),
+            ).reset_index()
+
+        joined = agg_search_type(cur_dates).merge(
+            agg_search_type(pri_dates), on=["market", "search_type"], how="outer", suffixes=("_r", "_p")
+        ).fillna(0)
+
+        mom_by_market = {}
+        for _, row in joined.iterrows():
+            imp_r, imp_p = row["impressions_r"], row["impressions_p"]
+            mom_by_market.setdefault(row["market"], {})[row["search_type"]] = {
+                "impressions_recent": int(imp_r), "impressions_prior": int(imp_p),
+                "impressions_change": int(imp_r - imp_p),
+                "impressions_pct": round((imp_r - imp_p) / imp_p * 100, 1) if imp_p > 0 else None,
+                "clicks_recent": int(row["clicks_r"]), "clicks_prior": int(row["clicks_p"]),
+            }
+        search_type_mom = {
+            "period_current": cur_label, "period_prior": pri_label,
+            "by_market": mom_by_market,
+        }
+
     return {
         "by_market_device": by_market_device,
         "by_market_search": by_market_search,
+        "search_type_mom": search_type_mom,
         "daily_device": daily_device,
         "daily_search": daily_search,
     }
@@ -1969,6 +2004,10 @@ def main():
         # movers, calendar_mom) — treat it as unavailable here rather than
         # feeding the frontend a shape it doesn't expect.
         all_data["serp_features"] = {"insufficient_data": True}
+        # Same story for the historical baseline's device_search.json — it
+        # predates the search_type_mom addition.
+        if isinstance(all_data.get("device_search"), dict):
+            all_data["device_search"]["search_type_mom"] = {"insufficient_data": True}
         all_data["monthly_trend"] = generate_monthly_trend(
             pd.DataFrame(), historical_monthly
         ) if historical_monthly else {"months": [], "all_markets": {}, "by_market": {}}
