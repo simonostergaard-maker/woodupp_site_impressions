@@ -4,9 +4,10 @@ setlocal
 :: ============================================================
 ::  WoodUpp Dashboard — Daily Update Script
 ::  1. Pull latest code from GitHub
-::  2. Extract GSC data from BigQuery  -> data/woodupp_url_impressions.csv
-::  3. Rebuild index.html              (preprocess.py)
-::  4. Commit and push to GitHub
+::  2. Make sure required Python packages are installed
+::  3. Extract GSC data from BigQuery  -> data/woodupp_url_impressions.csv
+::  4. Rebuild index.html              (preprocess.py)
+::  5. Commit and push to GitHub
 :: ============================================================
 
 set SCRIPT_DIR=%~dp0
@@ -29,7 +30,7 @@ echo ============================================================
 
 :: ── Step 1: Pull latest code ─────────────────────────────────
 echo.
-echo [1/4] Pulling latest code from GitHub...
+echo [1/5] Pulling latest code from GitHub...
 git pull origin main
 if errorlevel 1 (
     echo ERROR: git pull failed. Aborting.
@@ -37,9 +38,25 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: ── Step 2: Extract GSC data from BigQuery ───────────────────
+:: ── Step 2: Make sure required packages are installed ─────────
+:: Runs on every invocation so a wiped/reinstalled Python environment
+:: (which silently broke this script for several days in Oct 2026 — see
+:: git history) fixes itself instead of hard-failing step 3. Uses
+:: `python -m pip`, not `pip.exe` directly: some Application Control /
+:: allowlisting policies block the standalone pip.exe but allow pip
+:: running as a module inside the already-trusted python.exe.
 echo.
-echo [2/4] Extracting GSC data from BigQuery...
+echo [2/5] Checking required Python packages...
+python -m pip install -q --disable-pip-version-check -r requirements.txt
+if errorlevel 1 (
+    echo ERROR: failed to install required packages. Aborting.
+    if %SILENT%==0 pause
+    exit /b 1
+)
+
+:: ── Step 3: Extract GSC data from BigQuery ───────────────────
+echo.
+echo [3/5] Extracting GSC data from BigQuery...
 python extract_gsc.py
 if errorlevel 1 (
     echo ERROR: extract_gsc.py failed. Aborting.
@@ -47,9 +64,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: ── Step 3: Rebuild the dashboard HTML ───────────────────────
+:: ── Step 4: Rebuild the dashboard HTML ───────────────────────
 echo.
-echo [3/4] Rebuilding dashboard...
+echo [4/5] Rebuilding dashboard...
 python preprocess.py data\woodupp_url_impressions.csv
 if errorlevel 1 (
     echo ERROR: preprocess.py failed. Aborting.
@@ -57,9 +74,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: ── Step 4: Commit and push to GitHub ────────────────────────
+:: ── Step 5: Commit and push to GitHub ────────────────────────
 echo.
-echo [4/4] Pushing to GitHub...
+echo [5/5] Pushing to GitHub...
 git add index.html
 git diff --cached --quiet
 if errorlevel 1 (
