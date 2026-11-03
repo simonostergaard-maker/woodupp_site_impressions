@@ -37,7 +37,11 @@ DOMAIN_MARKET_MAP = {
     "coza": {"domain": "woodupp.co.za", "market": "South Africa", "flag": "\U0001f1ff\U0001f1e6"},
     "com_na": {"domain": "woodupp.com.na", "market": "Namibia", "flag": "\U0001f1f3\U0001f1e6"},
     "com": {"domain": "woodupp.com", "market": "Global (.com)", "flag": "\U0001f310"},
-    "us": {"domain": "woodupp.com/us", "market": "USA", "flag": "\U0001f1fa\U0001f1f8"},
+    # "us" is woodupp.com/us (a URL-prefix slice of the same domain as "com",
+    # not its own ccTLD like every other market) and reports too small a
+    # volume to read as its own market — folded into Global (.com) so its
+    # rows join that total instead of showing as a confusing near-empty row.
+    "us": {"domain": "woodupp.com/us", "market": "Global (.com)", "flag": "\U0001f310"},
     "de": {"domain": "woodupp.de", "market": "Germany", "flag": "\U0001f1e9\U0001f1ea"},
     "dk": {"domain": "woodupp.dk", "market": "Denmark", "flag": "\U0001f1e9\U0001f1f0"},
     "es": {"domain": "woodupp.es", "market": "Spain", "flag": "\U0001f1ea\U0001f1f8"},
@@ -117,14 +121,20 @@ def generate_overview(df):
     dates = sorted(df["data_date"].unique().tolist())
     markets = sorted(df["market"].unique().tolist())
 
+    # Several country codes can share one market (e.g. "us" folds into
+    # "Global (.com)" — see DOMAIN_MARKET_MAP) — dedupe by market name so
+    # filter dropdowns don't get the same market listed twice.
+    seen_market_names = set()
+    market_list = []
+    for code, info in sorted(DOMAIN_MARKET_MAP.items(), key=lambda x: x[1]["market"]):
+        if info["market"] in seen_market_names:
+            continue
+        seen_market_names.add(info["market"])
+        market_list.append({"code": code, "market": info["market"], "domain": info["domain"], "flag": info["flag"]})
+
     overview = {
         "dates": dates,
-        "markets": [{
-            "code": code,
-            "market": info["market"],
-            "domain": info["domain"],
-            "flag": info["flag"],
-        } for code, info in sorted(DOMAIN_MARKET_MAP.items(), key=lambda x: x[1]["market"])],
+        "markets": market_list,
         "totals": {
             "impressions": int(df["impressions"].sum()),
             "clicks": int(df["clicks"].sum()),
