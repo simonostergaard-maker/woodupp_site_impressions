@@ -30,7 +30,11 @@ DEFAULT_CSV = Path(r"C:\Users\sos\Desktop\Claude\Woodupp\woodupp_url_impressions
 DOMAIN_MARKET_MAP = {
     "ae": {"domain": "woodupp.ae", "market": "UAE", "flag": "\U0001f1e6\U0001f1ea"},
     "at": {"domain": "woodupp.at", "market": "Austria", "flag": "\U0001f1e6\U0001f1f9"},
-    "au": {"domain": "woodupp.au", "market": "Australia", "flag": "\U0001f1e6\U0001f1fa"},
+    # Australia moved from woodupp.au to woodupp.com.au (new Search
+    # Console property); both still tag rows country_code='au' so this
+    # just continues the same "Australia" market — see
+    # bigquery_update_australia.sql.
+    "au": {"domain": "woodupp.com.au", "market": "Australia", "flag": "\U0001f1e6\U0001f1fa"},
     "be": {"domain": "woodupp.be", "market": "Belgium", "flag": "\U0001f1e7\U0001f1ea"},
     "ch": {"domain": "woodupp.ch", "market": "Switzerland", "flag": "\U0001f1e8\U0001f1ed"},
     "couk": {"domain": "woodupp.co.uk", "market": "United Kingdom", "flag": "\U0001f1ec\U0001f1e7"},
