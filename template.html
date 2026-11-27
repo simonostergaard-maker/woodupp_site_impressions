@@ -443,7 +443,10 @@ select:focus, input:focus { border-color: var(--accent); }
       <select id="biz-detail-select" style="margin-bottom:10px"><option value="">Select a business area to inspect...</option></select>
       <div id="biz-detail-kpis"></div>
       <div id="biz-detail-compare" class="card" style="padding:10px 18px;font-size:13px;color:var(--muted);margin:0 0 16px"></div>
-      <div class="card" style="margin:0"><h3>Performance by Market</h3><div class="chart-container" id="chart-biz-markets"></div></div>
+      <div class="grid-2">
+        <div class="card" style="margin:0"><h3>Weekly Position Trend</h3><div class="chart-container" id="chart-biz-trend"></div></div>
+        <div class="card" style="margin:0"><h3>Performance by Market</h3><div class="chart-container" id="chart-biz-markets"></div></div>
+      </div>
       <div class="card" style="margin-top:16px;margin-bottom:0"><h3>Per-Market Breakdown</h3><div class="table-wrap" id="biz-detail-markets"></div></div>
     </div>
   </div>
@@ -1944,6 +1947,13 @@ function selectBusinessArea(type, key) {
       compareEl.innerHTML = 'No comparable prior-period data for this business area (below the minimum impression threshold, or too new).';
     }
   }
+
+  const trendKey = type + '|' + key;
+  const weekly = (ba.trend_weekly && ba.trend_weekly[trendKey]) || {};
+  const weeks = Object.keys(weekly).sort();
+  makeChart('chart-biz-trend', { type:'line', data:{labels:weeks.map(w=>w.slice(5)),datasets:[
+    {label:'Avg Position',data:weeks.map(w=>weekly[w].avg_position),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.3,pointRadius:2},
+  ]}, options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`Avg Position: ${ctx.parsed.y}`}}},scales:{x:{ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}},y:{reverse:true,title:{display:true,text:'Position (lower is better)',color:'#8b8fa3'},ticks:{color:'#8b8fa3'},grid:{color:'#2a2d3a'}}}}});
 
   const topMarkets = marketRows.slice(0,20);
   makeChart('chart-biz-markets', { type:'bar', data:{labels:topMarkets.map(m=>m.market),datasets:[

@@ -508,6 +508,24 @@ def generate_business_areas(df):
     kept_ids = {f"{t}|{k}" for t, k in kept_keys}
     merged["area_id"] = merged["area_type"] + "|" + merged["area_key"]
 
+    # ── Weekly trend per business area ──
+    # Same week-bucketing used by generate_keyword_themes()/generate_serp_features()
+    # — "is this business area's ranking/traffic actually trending" needs more
+    # than the single before/after snapshot the movers comparison below gives.
+    kept_merged = merged[merged["area_id"].isin(kept_ids)].copy()
+    kept_merged["week"] = pd.to_datetime(kept_merged["data_date"]).dt.to_period("W-SUN").apply(
+        lambda p: p.start_time.strftime("%Y-%m-%d"))
+    week_agg = kept_merged.groupby(["area_id", "week"]).agg(
+        impressions=("impressions", "sum"), clicks=("clicks", "sum"), sum_position=("sum_position", "sum"),
+    ).reset_index()
+    week_agg["avg_position"] = (week_agg["sum_position"] / week_agg["impressions"]).round(1)
+    trend_weekly = {}
+    for _, row in week_agg.iterrows():
+        trend_weekly.setdefault(row["area_id"], {})[row["week"]] = {
+            "impressions": int(row["impressions"]), "clicks": int(row["clicks"]),
+            "avg_position": float(row["avg_position"]) if pd.notna(row["avg_position"]) else 0,
+        }
+
     def period_stats(date_set, group_cols):
         sub = merged[merged["data_date"].isin(date_set) & merged["area_id"].isin(kept_ids)]
         return sub.groupby(group_cols).agg(
@@ -574,6 +592,7 @@ def generate_business_areas(df):
         "has_collection_mapping": bool(collections_map),
         "areas": areas_out,
         "area_market": area_market_out,
+        "trend_weekly": trend_weekly,
         "movers": movers,
         "calendar_mom": calendar_mom,
     }
